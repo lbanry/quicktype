@@ -1,0 +1,11 @@
+# Default owners for the entire repository
+* @lincolnbanry
+
+# Workflows and release automation
+/.github/workflows/ @lincolnbanry
+
+# Core app and infrastructure
+/Sources/QuickType/ @lincolnbanry
+
+# Tests
+/Tests/ @lincolnbanry

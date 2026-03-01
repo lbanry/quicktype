@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-artifact:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build Release Binary
+        run: swift build -c release
+
+      - name: Package Binary
+        run: |
+          mkdir -p dist
+          cp .build/release/QuickType dist/QuickType
+          chmod +x dist/QuickType
+          tar -czf quicktype-${GITHUB_REF_NAME}-macos-arm64.tar.gz -C dist QuickType
+
+      - name: Generate SHA256
+        run: shasum -a 256 quicktype-${GITHUB_REF_NAME}-macos-arm64.tar.gz > quicktype-${GITHUB_REF_NAME}-macos-arm64.tar.gz.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            quicktype-${GITHUB_REF_NAME}-macos-arm64.tar.gz
+            quicktype-${GITHUB_REF_NAME}-macos-arm64.tar.gz.sha256
+          generate_release_notes: true
