@@ -16,7 +16,8 @@ struct QuickTypeApp: App {
             bookmarkService: bookmarkService,
             fileWriter: AtomicFileWriter(),
             recoveryService: RecoveryService(bookmarkService: bookmarkService),
-            hotkeyService: GlobalHotkeyService()
+            hotkeyService: GlobalHotkeyService(),
+            selectionCaptureService: SelectionCaptureService()
         )
         _model = StateObject(wrappedValue: model)
     }
@@ -52,17 +53,24 @@ struct QuickTypeApp: App {
                 }
                 .keyboardShortcut("t", modifiers: [.command, .option])
 
+                Button("Copy Selection to New Note") {
+                    model.copyHighlightedTextToNewNote()
+                }
+                .keyboardShortcut("c", modifiers: [.command, .option, .shift])
+
                 Button("Open Settings") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "settings-window")
                 }
                 .keyboardShortcut(",", modifiers: [.command])
             }
         }
 
-        Settings {
+        WindowGroup("Settings", id: "settings-window") {
             SettingsView()
                 .environmentObject(model)
         }
+        .windowResizability(.contentSize)
 
         MenuBarExtra("QuickType", systemImage: "note.text") {
             Button("Open Capture") {
@@ -70,7 +78,11 @@ struct QuickTypeApp: App {
                 openWindow(id: "capture")
             }
             Button("Open Settings") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "settings-window")
+            }
+            Button("Copy Selection to New Note") {
+                model.copyHighlightedTextToNewNote()
             }
             Divider()
             if let selected = model.selectedNote {

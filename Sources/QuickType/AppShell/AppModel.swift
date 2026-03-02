@@ -18,7 +18,10 @@ final class AppModel: ObservableObject {
     let fileWriter: FileWriterProtocol
     let recoveryService: RecoveryServiceProtocol
     let hotkeyService: HotkeyServiceProtocol
+    let selectionCaptureService: SelectionCaptureServiceProtocol
     let formatter = EntryFormatter()
+    private var workspaceObserver: NSObjectProtocol?
+    private var lastExternalProcessID: pid_t?
 
     init(
         noteRepository: NoteRepositoryProtocol,
@@ -26,7 +29,8 @@ final class AppModel: ObservableObject {
         bookmarkService: BookmarkServiceProtocol,
         fileWriter: FileWriterProtocol,
         recoveryService: RecoveryServiceProtocol,
-        hotkeyService: HotkeyServiceProtocol
+        hotkeyService: HotkeyServiceProtocol,
+        selectionCaptureService: SelectionCaptureServiceProtocol
     ) {
         self.noteRepository = noteRepository
         self.settingsStore = settingsStore
@@ -34,6 +38,7 @@ final class AppModel: ObservableObject {
         self.fileWriter = fileWriter
         self.recoveryService = recoveryService
         self.hotkeyService = hotkeyService
+        self.selectionCaptureService = selectionCaptureService
     }
 
     var selectedNote: NoteTarget? {
@@ -47,7 +52,13 @@ final class AppModel: ObservableObject {
             selectedNoteID = noteTargets.first?.id
             recoveryIssues = recoveryService.scan(noteTargets: noteTargets)
             hotkeyService.onHotkeyPressed = openCaptureWindow
-            hotkeyService.start(with: settings.hotkey)
+            hotkeyService.onClipHotkeyPressed = { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.copyHighlightedTextToNewNote()
+                }
+            }
+            hotkeyService.start(with: settings.hotkey, clipHotkey: .clipDefault)
+            startTrackingActiveApplications()
         } catch {
             Logger.error("Failed bootstrap: \(error.localizedDescription)")
             lastStatusMessage = "Failed to load state: \(error.localizedDescription)"
@@ -318,4 +329,92 @@ final class AppModel: ObservableObject {
             lastStatusMessage = "Backup restore failed: \(error.localizedDescription)"
         }
     }
+
+    func copyHighlightedTextToNewNote() {
+        do {
+            let selection = try selectionCaptureService.captureCurrentSelection(preferredProcessID: lastExternalProcessID)
+            let content = clipContent(from: selection)
+            let now = selection.capturedAt
+
+            let nameFormatter = DateFormatter()
+            nameFormatter.dateFormat = "yyyyMMdd-HHmmss"
+            let filename = "Clip-\(nameFormatter.string(from: now)).md"
+            let fileURL = AppPaths.clipsDirectory.appendingPathComponent(filename)
+
+            guard let data = content.data(using: .utf8) else {
+                throw NSError(domain: "QuickType", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Unable to encode clip content as UTF-8."])
+            }
+            try data.write(to: fileURL, options: .atomic)
+
+            let bookmark = try? bookmarkService.makeBookmark(for: fileURL)
+            let target = NoteTarget(
+                id: UUID(),
+                displayName: filename,
+                filePath: fileURL.path,
+                bookmarkData: bookmark,
+                format: .markdown,
+                externalAppPath: nil,
+                createdAt: now,
+                updatedAt: now
+            )
+
+            noteTargets.insert(target, at: 0)
+            selectedNoteID = target.id
+            persist()
+            lastStatusMessage = "Created clip note from highlighted text."
+        } catch {
+            Logger.error("Copy highlighted text failed: \(error.localizedDescription)")
+            lastStatusMessage = error.localizedDescription
+        }
+    }
+
+    private func clipContent(from selection: SelectionCapture) -> String {
+        let timestamp = ISO8601DateFormatter().string(from: selection.capturedAt)
+        var lines: [String] = [
+            "# Captured Clip",
+            "",
+            "- Captured: \(timestamp)",
+            "- Source App: \(selection.sourceAppName) (\(selection.sourceBundleID))"
+        ]
+        if let title = selection.sourceWindowTitle, !title.isEmpty {
+            lines.append("- Source Window: \(title)")
+        }
+        if let url = selection.sourceURL, !url.isEmpty {
+            lines.append("- Source URL: \(url)")
+        }
+        lines.append("")
+        lines.append("```")
+        lines.append(selection.text)
+        lines.append("```")
+        lines.append("")
+        return lines.joined(separator: "\n")
+    }
+
+    private func startTrackingActiveApplications() {
+        let nc = NSWorkspace.shared.notificationCenter
+        workspaceObserver = nc.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.updateLastExternalApplication(app)
+            }
+        }
+
+        if let frontmost = NSWorkspace.shared.frontmostApplication {
+            updateLastExternalApplication(frontmost)
+        }
+    }
+
+    private func updateLastExternalApplication(_ app: NSRunningApplication) {
+        guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            return
+        }
+        lastExternalProcessID = app.processIdentifier
+    }
+
 }

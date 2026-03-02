@@ -3,26 +3,35 @@ import Carbon
 
 final class GlobalHotkeyService: HotkeyServiceProtocol {
     var onHotkeyPressed: (() -> Void)?
+    var onClipHotkeyPressed: (() -> Void)?
 
     private var hotKeyRef: EventHotKeyRef?
+    private var clipHotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
 
     deinit {
         stop()
     }
 
-    func start(with hotkey: HotkeyDefinition) {
+    func start(with hotkey: HotkeyDefinition, clipHotkey: HotkeyDefinition) {
         installHandlerIfNeeded()
-        registerHotKey(hotkey)
+        registerHotKey(hotkey, id: 1, ref: &hotKeyRef)
+        registerHotKey(clipHotkey, id: 2, ref: &clipHotKeyRef)
     }
 
     func update(hotkey: HotkeyDefinition) {
-        unregisterHotKey()
-        registerHotKey(hotkey)
+        unregisterHotKey(ref: &hotKeyRef)
+        registerHotKey(hotkey, id: 1, ref: &hotKeyRef)
+    }
+
+    func update(clipHotkey: HotkeyDefinition) {
+        unregisterHotKey(ref: &clipHotKeyRef)
+        registerHotKey(clipHotkey, id: 2, ref: &clipHotKeyRef)
     }
 
     func stop() {
-        unregisterHotKey()
+        unregisterHotKey(ref: &hotKeyRef)
+        unregisterHotKey(ref: &clipHotKeyRef)
         if let handler = eventHandlerRef {
             RemoveEventHandler(handler)
             eventHandlerRef = nil
@@ -49,6 +58,8 @@ final class GlobalHotkeyService: HotkeyServiceProtocol {
             )
             if hkID.id == 1 {
                 service.onHotkeyPressed?()
+            } else if hkID.id == 2 {
+                service.onClipHotkeyPressed?()
             }
             return noErr
         }
@@ -63,22 +74,22 @@ final class GlobalHotkeyService: HotkeyServiceProtocol {
         )
     }
 
-    private func registerHotKey(_ hotkey: HotkeyDefinition) {
-        let hotKeyID = EventHotKeyID(signature: OSType(0x51545950), id: 1)
+    private func registerHotKey(_ hotkey: HotkeyDefinition, id: UInt32, ref: inout EventHotKeyRef?) {
+        let hotKeyID = EventHotKeyID(signature: OSType(0x51545950), id: id)
         RegisterEventHotKey(
             hotkey.keyCode,
             hotkey.modifiers,
             hotKeyID,
             GetApplicationEventTarget(),
             0,
-            &hotKeyRef
+            &ref
         )
     }
 
-    private func unregisterHotKey() {
-        if let hotKeyRef {
+    private func unregisterHotKey(ref: inout EventHotKeyRef?) {
+        if let hotKeyRef = ref {
             UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
+            ref = nil
         }
     }
 }

@@ -31,4 +31,12 @@ enum AppPaths {
     static var logsFile: URL {
         appSupportDirectory.appendingPathComponent("quicktype.log")
     }
+
+    static var clipsDirectory: URL {
+        let dir = appSupportDirectory.appendingPathComponent("Clips", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
 }

@@ -64,6 +64,7 @@ struct CaptureView: View {
 struct CommandPaletteView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
     @State private var search = ""
 
     private var actions: [(String, () -> Void)] {
@@ -72,8 +73,9 @@ struct CommandPaletteView: View {
             ("Import Note Target", { model.importNoteTarget() }),
             ("Open Selected Note", { model.openSelectedInExternalApp() }),
             ("Reveal in Finder", { model.revealSelectedNoteInFinder() }),
+            ("Copy Selection to New Note", { model.copyHighlightedTextToNewNote() }),
             ("Refresh Recovery Scan", { model.refreshRecoveryIssues() }),
-            ("Open Settings", { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) })
+            ("Open Settings", { openWindow(id: "settings-window") })
         ]
     }
 

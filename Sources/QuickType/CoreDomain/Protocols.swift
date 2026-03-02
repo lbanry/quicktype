@@ -26,11 +26,17 @@ protocol SettingsStoreProtocol {
 
 protocol HotkeyServiceProtocol: AnyObject {
     var onHotkeyPressed: (() -> Void)? { get set }
-    func start(with hotkey: HotkeyDefinition)
+    var onClipHotkeyPressed: (() -> Void)? { get set }
+    func start(with hotkey: HotkeyDefinition, clipHotkey: HotkeyDefinition)
     func update(hotkey: HotkeyDefinition)
+    func update(clipHotkey: HotkeyDefinition)
     func stop()
 }
 
 protocol RecoveryServiceProtocol {
     func scan(noteTargets: [NoteTarget]) -> [RecoveryIssue]
+}
+
+protocol SelectionCaptureServiceProtocol {
+    func captureCurrentSelection(preferredProcessID: pid_t?) throws -> SelectionCapture
 }

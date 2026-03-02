@@ -52,6 +52,11 @@ struct HotkeyDefinition: Codable, Equatable {
         keyCode: UInt32(kVK_ANSI_T),
         modifiers: UInt32(cmdKey) | UInt32(optionKey)
     )
+
+    static let clipDefault = HotkeyDefinition(
+        keyCode: UInt32(kVK_ANSI_C),
+        modifiers: UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey)
+    )
 }
 
 struct NoteTarget: Identifiable, Codable, Hashable {
@@ -72,6 +77,15 @@ struct CaptureEntry {
     var rawText: String
     var createdAt: Date
     var formattedText: String
+}
+
+struct SelectionCapture {
+    var text: String
+    var sourceAppName: String
+    var sourceBundleID: String
+    var sourceWindowTitle: String?
+    var sourceURL: String?
+    var capturedAt: Date
 }
 
 struct WriteResult {
