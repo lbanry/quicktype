@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     let recoveryService: RecoveryServiceProtocol
     let hotkeyService: HotkeyServiceProtocol
     let selectionCaptureService: SelectionCaptureServiceProtocol
+    let obsidianClipExportService = ObsidianClipExportService()
     let formatter = EntryFormatter()
     private var workspaceObserver: NSObjectProtocol?
     private var lastExternalProcessID: pid_t?
@@ -228,6 +229,7 @@ final class AppModel: ObservableObject {
         settings = updated
         persist()
         hotkeyService.update(hotkey: settings.hotkey)
+        hotkeyService.update(clipHotkey: .clipDefault)
         if settings.launchAtLogin {
             LaunchAtLoginService.setEnabled(true)
         } else {
@@ -333,23 +335,12 @@ final class AppModel: ObservableObject {
     func copyHighlightedTextToNewNote() {
         do {
             let selection = try selectionCaptureService.captureCurrentSelection(preferredProcessID: lastExternalProcessID)
-            let content = clipContent(from: selection)
-            let now = selection.capturedAt
-
-            let nameFormatter = DateFormatter()
-            nameFormatter.dateFormat = "yyyyMMdd-HHmmss"
-            let filename = "Clip-\(nameFormatter.string(from: now)).md"
-            let fileURL = AppPaths.clipsDirectory.appendingPathComponent(filename)
-
-            guard let data = content.data(using: .utf8) else {
-                throw NSError(domain: "QuickType", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Unable to encode clip content as UTF-8."])
-            }
-            try data.write(to: fileURL, options: .atomic)
-
+            let fileURL = try createLocalClipNote(from: selection)
             let bookmark = try? bookmarkService.makeBookmark(for: fileURL)
+            let now = selection.capturedAt
             let target = NoteTarget(
                 id: UUID(),
-                displayName: filename,
+                displayName: fileURL.lastPathComponent,
                 filePath: fileURL.path,
                 bookmarkData: bookmark,
                 format: .markdown,
@@ -366,6 +357,59 @@ final class AppModel: ObservableObject {
             Logger.error("Copy highlighted text failed: \(error.localizedDescription)")
             lastStatusMessage = error.localizedDescription
         }
+    }
+
+    func saveHighlightedTextToObsidian(summarizeFirst: Bool) {
+        guard settings.obsidianIntegrationEnabled else {
+            lastStatusMessage = "Obsidian integration is disabled in Settings."
+            return
+        }
+
+        do {
+            let selection = try selectionCaptureService.captureCurrentSelection(preferredProcessID: lastExternalProcessID)
+            let attachments = currentPasteboardAttachments()
+            let payload = ObsidianClipPayloadV1(
+                version: 1,
+                clipId: UUID().uuidString,
+                capturedAt: ISO8601DateFormatter().string(from: selection.capturedAt),
+                sourceAppName: selection.sourceAppName,
+                sourceBundleId: selection.sourceBundleID,
+                sourceWindowTitle: selection.sourceWindowTitle,
+                sourceUrl: selection.sourceURL,
+                contentText: selection.text,
+                attachments: attachments,
+                requestedAction: resolveObsidianAction(summarizeFirst: summarizeFirst),
+                targetHint: ObsidianTargetHint(
+                    vaultName: settings.obsidianTargetVaultName.isEmpty ? nil : settings.obsidianTargetVaultName,
+                    folderPath: settings.obsidianDefaultFolderPath.isEmpty ? nil : settings.obsidianDefaultFolderPath
+                )
+            )
+
+            let url = try obsidianClipExportService.buildObsidianURL(payload: payload)
+            let opened = NSWorkspace.shared.open(url)
+            if opened {
+                lastStatusMessage = "Sent clip to Obsidian."
+            } else {
+                lastStatusMessage = "Unable to open Obsidian URI. Confirm Obsidian is installed."
+            }
+        } catch {
+            Logger.error("Save highlighted text to Obsidian failed: \(error.localizedDescription)")
+            lastStatusMessage = error.localizedDescription
+        }
+    }
+
+    private func createLocalClipNote(from selection: SelectionCapture) throws -> URL {
+        let content = clipContent(from: selection)
+        let nameFormatter = DateFormatter()
+        nameFormatter.dateFormat = "yyyyMMdd-HHmmss"
+        let filename = "Clip-\(nameFormatter.string(from: selection.capturedAt)).md"
+        let fileURL = AppPaths.clipsDirectory.appendingPathComponent(filename)
+
+        guard let data = content.data(using: .utf8) else {
+            throw NSError(domain: "QuickType", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Unable to encode clip content as UTF-8."])
+        }
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
     }
 
     private func clipContent(from selection: SelectionCapture) -> String {
@@ -415,6 +459,51 @@ final class AppModel: ObservableObject {
             return
         }
         lastExternalProcessID = app.processIdentifier
+    }
+
+    private func resolveObsidianAction(summarizeFirst: Bool) -> ObsidianRequestedAction {
+        if summarizeFirst || settings.obsidianDefaultSummarizeBeforeSave {
+            return .summarizeThenSave
+        }
+        return .save
+    }
+
+    private func currentPasteboardAttachments() -> [ObsidianClipAttachment] {
+        let pasteboard = NSPasteboard.general
+        guard let items = pasteboard.pasteboardItems else {
+            return []
+        }
+
+        var attachments: [ObsidianClipAttachment] = []
+        for item in items {
+            guard let path = item.string(forType: .fileURL),
+                  let url = URL(string: path),
+                  url.isFileURL else {
+                continue
+            }
+
+            let ext = url.pathExtension.lowercased()
+            let mime: String
+            switch ext {
+            case "png": mime = "image/png"
+            case "jpg", "jpeg": mime = "image/jpeg"
+            case "gif": mime = "image/gif"
+            case "webp": mime = "image/webp"
+            case "pdf": mime = "application/pdf"
+            default: continue
+            }
+
+            attachments.append(
+                ObsidianClipAttachment(
+                    name: url.lastPathComponent,
+                    mimeType: mime,
+                    sourcePath: url.path,
+                    bytes: nil,
+                    sha256: nil
+                )
+            )
+        }
+        return attachments
     }
 
 }

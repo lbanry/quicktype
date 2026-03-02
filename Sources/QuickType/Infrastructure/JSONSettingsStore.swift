@@ -37,6 +37,9 @@ final class JSONSettingsStore: SettingsStoreProtocol {
         if migrated.backupRetentionCount <= 0 {
             migrated.backupRetentionCount = AppSettings.default.backupRetentionCount
         }
+        if migrated.obsidianDefaultFolderPath.isEmpty {
+            migrated.obsidianDefaultFolderPath = AppSettings.default.obsidianDefaultFolderPath
+        }
         return migrated
     }
 }

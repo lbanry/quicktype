@@ -20,3 +20,24 @@ quicktype capture --target <uuid> --text "message"
 ```
 
 Current repo includes URL parser plumbing but does not ship a standalone CLI binary.
+
+## Obsidian callback contract (V1)
+
+- Scheme: `obsidian://quicktype-clip`
+- Query params:
+  - `payload` (base64url JSON)
+  - `payloadFile` (absolute JSON file path fallback for large payloads)
+
+### Payload type: `QuickTypeClipPayloadV1`
+
+- `version` (must be `1`)
+- `clipId`
+- `capturedAt` (ISO 8601 string)
+- `sourceAppName`
+- `sourceBundleId`
+- `sourceWindowTitle?`
+- `sourceUrl?`
+- `contentText`
+- `attachments[]`: `{name, mimeType, sourcePath?, bytes?, sha256?}`
+- `requestedAction`: `save | summarize_then_save`
+- `targetHint?`: `{vaultName?, folderPath?}`

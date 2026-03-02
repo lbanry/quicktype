@@ -58,6 +58,15 @@ struct QuickTypeApp: App {
                 }
                 .keyboardShortcut("c", modifiers: [.command, .option, .shift])
 
+                Button("Save Selection to Obsidian") {
+                    model.saveHighlightedTextToObsidian(summarizeFirst: false)
+                }
+                .keyboardShortcut("o", modifiers: [.command, .option, .shift])
+
+                Button("Summarize and Save to Obsidian") {
+                    model.saveHighlightedTextToObsidian(summarizeFirst: true)
+                }
+
                 Button("Open Settings") {
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "settings-window")
@@ -83,6 +92,12 @@ struct QuickTypeApp: App {
             }
             Button("Copy Selection to New Note") {
                 model.copyHighlightedTextToNewNote()
+            }
+            Button("Save Selection to Obsidian") {
+                model.saveHighlightedTextToObsidian(summarizeFirst: false)
+            }
+            Button("Summarize and Save to Obsidian") {
+                model.saveHighlightedTextToObsidian(summarizeFirst: true)
             }
             Divider()
             if let selected = model.selectedNote {

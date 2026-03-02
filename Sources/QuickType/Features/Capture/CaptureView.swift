@@ -74,6 +74,8 @@ struct CommandPaletteView: View {
             ("Open Selected Note", { model.openSelectedInExternalApp() }),
             ("Reveal in Finder", { model.revealSelectedNoteInFinder() }),
             ("Copy Selection to New Note", { model.copyHighlightedTextToNewNote() }),
+            ("Save Selection to Obsidian", { model.saveHighlightedTextToObsidian(summarizeFirst: false) }),
+            ("Summarize and Save to Obsidian", { model.saveHighlightedTextToObsidian(summarizeFirst: true) }),
             ("Refresh Recovery Scan", { model.refreshRecoveryIssues() }),
             ("Open Settings", { openWindow(id: "settings-window") })
         ]

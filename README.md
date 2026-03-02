@@ -15,6 +15,20 @@ QuickType is a local-first, privacy-focused macOS quick-capture app inspired by 
 - Integrity/recovery scan for missing/stale/unreadable note targets
 - Diagnostics copy and settings export
 - URL scheme capture stub: `quicktype://capture?text=...&target=<uuid>`
+- Obsidian integration actions:
+  - Save selection to Obsidian
+  - Summarize then save to Obsidian
+
+## Obsidian Plugin
+
+An Obsidian companion plugin now lives in [`obsidian-plugin/`](obsidian-plugin/README.md).
+
+It supports:
+
+- `obsidian://quicktype-clip` URI payload ingestion
+- Existing-folder selection + default folder behavior
+- Image/PDF attachment import
+- Optional AI summarize-then-save (BYO API key, OpenAI-compatible endpoint)
 
 ## Build
 

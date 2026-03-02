@@ -23,3 +23,23 @@ jobs:
 
       - name: Test
         run: swift test
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install plugin dependencies
+        run: |
+          cd obsidian-plugin
+          npm ci
+
+      - name: Plugin typecheck
+        run: |
+          cd obsidian-plugin
+          npm run typecheck
+
+      - name: Plugin build
+        run: |
+          cd obsidian-plugin
+          npm run build

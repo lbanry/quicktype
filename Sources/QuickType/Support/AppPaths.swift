@@ -39,4 +39,12 @@ enum AppPaths {
         }
         return dir
     }
+
+    static var obsidianPayloadsDirectory: URL {
+        let dir = appSupportDirectory.appendingPathComponent("ObsidianPayloads", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
 }

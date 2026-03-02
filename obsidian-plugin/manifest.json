@@ -1,0 +1,10 @@
+{
+  "id": "quicktype-clip-inbox",
+  "name": "QuickType Clip Inbox",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Save QuickType clips and attachments to Obsidian with optional AI summaries.",
+  "author": "Lincoln Banry",
+  "authorUrl": "https://github.com/lbanry/quicktype",
+  "isDesktopOnly": true
+}

@@ -96,6 +96,30 @@ struct SettingsView: View {
                     }
                 ))
             }
+
+            Divider()
+            Text("Obsidian Integration")
+                .font(.headline)
+
+            Toggle("Enable Obsidian integration", isOn: Binding(
+                get: { model.settings.obsidianIntegrationEnabled },
+                set: { newValue in model.updateSettings { $0.obsidianIntegrationEnabled = newValue } }
+            ))
+
+            TextField("Obsidian default folder path", text: Binding(
+                get: { model.settings.obsidianDefaultFolderPath },
+                set: { newValue in model.updateSettings { $0.obsidianDefaultFolderPath = newValue } }
+            ))
+
+            TextField("Obsidian target vault name (optional)", text: Binding(
+                get: { model.settings.obsidianTargetVaultName },
+                set: { newValue in model.updateSettings { $0.obsidianTargetVaultName = newValue } }
+            ))
+
+            Toggle("Default to summarize before Obsidian save", isOn: Binding(
+                get: { model.settings.obsidianDefaultSummarizeBeforeSave },
+                set: { newValue in model.updateSettings { $0.obsidianDefaultSummarizeBeforeSave = newValue } }
+            ))
         }
     }
 
