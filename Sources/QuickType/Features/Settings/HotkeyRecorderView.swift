@@ -5,6 +5,12 @@ import SwiftUI
 struct HotkeyRecorderView: NSViewRepresentable {
     @Binding var hotkey: HotkeyDefinition
 
+    static func describe(_ hotkey: HotkeyDefinition) -> String {
+        let key = keyCodeToString(hotkey.keyCode)
+        let mods = modifiersDescription(hotkey.modifiers)
+        return mods.isEmpty ? key : "\(mods)+\(key)"
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(hotkey: $hotkey)
     }
@@ -21,12 +27,10 @@ struct HotkeyRecorderView: NSViewRepresentable {
     }
 
     private func keyDescription(for hotkey: HotkeyDefinition) -> String {
-        let key = keyCodeToString(hotkey.keyCode)
-        let mods = modifiersDescription(hotkey.modifiers)
-        return mods.isEmpty ? key : "\(mods)+\(key)"
+        Self.describe(hotkey)
     }
 
-    private func modifiersDescription(_ flags: UInt32) -> String {
+    private static func modifiersDescription(_ flags: UInt32) -> String {
         var parts: [String] = []
         if flags & UInt32(cmdKey) != 0 { parts.append("Cmd") }
         if flags & UInt32(optionKey) != 0 { parts.append("Option") }
@@ -35,7 +39,7 @@ struct HotkeyRecorderView: NSViewRepresentable {
         return parts.joined(separator: "+")
     }
 
-    private func keyCodeToString(_ keyCode: UInt32) -> String {
+    private static func keyCodeToString(_ keyCode: UInt32) -> String {
         switch keyCode {
         case UInt32(kVK_ANSI_A): return "A"
         case UInt32(kVK_ANSI_B): return "B"

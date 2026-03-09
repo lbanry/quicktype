@@ -10,7 +10,9 @@ struct NotesManagementView: View {
                     .font(.title3.bold())
                 Spacer()
                 Button("Create") { model.createNoteTarget() }
+                    .glassControl()
                 Button("Import") { model.importNoteTarget() }
+                    .glassControl()
             }
 
             List(selection: Binding(get: { model.selectedNoteID }, set: { model.selectedNoteID = $0 })) {
@@ -25,15 +27,22 @@ struct NotesManagementView: View {
                 }
             }
             .frame(minHeight: 220)
+            .scrollContentBackground(.hidden)
+            .glassCard()
 
             HStack {
                 Button("Open") { model.openSelectedInExternalApp() }
+                    .glassControl()
                 Button("Reveal in Finder") { model.revealSelectedNoteInFinder() }
+                    .glassControl()
                 Button("Set External App") { model.selectExternalAppForSelectedNote() }
+                    .glassControl()
                 Spacer()
                 Button("Remove") { model.removeSelectedNote() }
+                    .glassControl()
             }
         }
         .padding()
+        .glassBackground()
     }
 }

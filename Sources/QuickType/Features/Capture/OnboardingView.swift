@@ -12,7 +12,9 @@ struct OnboardingView: View {
 
             HStack {
                 Button("Create Note") { model.createNoteTarget() }
+                    .glassControl()
                 Button("Import Note") { model.importNoteTarget() }
+                    .glassControl()
             }
 
             Text("No telemetry is sent by default. Data is local-first.")
@@ -20,5 +22,8 @@ struct OnboardingView: View {
                 .foregroundStyle(.secondary)
         }
         .padding()
+        .glassCard()
+        .padding()
+        .glassBackground()
     }
 }

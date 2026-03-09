@@ -20,6 +20,22 @@ enum AppPaths {
         appSupportDirectory.appendingPathComponent("notes_index.json")
     }
 
+    static var clipboardItemsFile: URL {
+        appSupportDirectory.appendingPathComponent("clipboard_items.json")
+    }
+
+    static var quickActionsFile: URL {
+        appSupportDirectory.appendingPathComponent("quick_actions.json")
+    }
+
+    static var promptsFile: URL {
+        appSupportDirectory.appendingPathComponent("prompts.json")
+    }
+
+    static var linksFile: URL {
+        appSupportDirectory.appendingPathComponent("links.json")
+    }
+
     static var backupsDirectory: URL {
         let dir = appSupportDirectory.appendingPathComponent("Backups", isDirectory: true)
         if !FileManager.default.fileExists(atPath: dir.path) {

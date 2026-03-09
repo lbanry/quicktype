@@ -52,6 +52,7 @@ enum ObsidianRequestedAction: String, Codable {
 struct ObsidianTargetHint: Codable {
     var vaultName: String?
     var folderPath: String?
+    var noteTitle: String?
 }
 
 struct ObsidianClipAttachment: Codable {
@@ -76,7 +77,7 @@ struct ObsidianClipPayloadV1: Codable {
     var targetHint: ObsidianTargetHint?
 }
 
-struct HotkeyDefinition: Codable, Equatable {
+struct HotkeyDefinition: Codable, Equatable, Hashable {
     var keyCode: UInt32
     var modifiers: UInt32
 
@@ -87,8 +88,68 @@ struct HotkeyDefinition: Codable, Equatable {
 
     static let clipDefault = HotkeyDefinition(
         keyCode: UInt32(kVK_ANSI_C),
-        modifiers: UInt32(cmdKey) | UInt32(optionKey) | UInt32(shiftKey)
+        modifiers: UInt32(cmdKey) | UInt32(shiftKey)
     )
+}
+
+enum QuickActionKind: String, Codable, CaseIterable, Identifiable {
+    case typeText
+    case copyText
+    case promptSelection
+    case pasteSavedClip
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .typeText: "Type Text"
+        case .copyText: "Copy Text"
+        case .promptSelection: "Prompt From Selection"
+        case .pasteSavedClip: "Paste Saved Clip"
+        }
+    }
+}
+
+enum CaptureDashboardTab: String, Identifiable {
+    case actions
+    case paste
+    case links
+
+    var id: String { rawValue }
+}
+
+struct QuickAction: Identifiable, Codable, Hashable {
+    var id: UUID
+    var title: String
+    var kind: QuickActionKind
+    var text: String
+    var clipboardItemID: UUID?
+    var hotkey: HotkeyDefinition?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+struct SavedPrompt: Identifiable, Codable, Hashable {
+    var id: UUID
+    var title: String
+    var body: String
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+struct SavedLink: Identifiable, Codable, Hashable {
+    var id: UUID
+    var title: String
+    var url: String
+    var folderPath: String
+    var summary: String?
+    var notes: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var aiPrompt: String?
+    var aiRequestDate: Date?
+    var aiResponseDate: Date?
+    var awaitingAIResponse: Bool
 }
 
 struct NoteTarget: Identifiable, Codable, Hashable {
@@ -120,6 +181,75 @@ struct SelectionCapture {
     var capturedAt: Date
 }
 
+struct ClipboardItem: Identifiable, Codable, Hashable {
+    var id: UUID
+    var title: String
+    var content: String
+    var createdAt: Date
+    var updatedAt: Date
+    var isKept: Bool
+    var aiPrompt: String?
+    var aiResponse: String?
+    var aiRequestDate: Date?
+    var aiResponseDate: Date?
+    var awaitingAIResponse: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case content
+        case createdAt
+        case updatedAt
+        case isKept
+        case aiPrompt
+        case aiResponse
+        case aiRequestDate
+        case aiResponseDate
+        case awaitingAIResponse
+    }
+
+    init(
+        id: UUID,
+        title: String,
+        content: String,
+        createdAt: Date,
+        updatedAt: Date,
+        isKept: Bool,
+        aiPrompt: String? = nil,
+        aiResponse: String? = nil,
+        aiRequestDate: Date? = nil,
+        aiResponseDate: Date? = nil,
+        awaitingAIResponse: Bool = false
+    ) {
+        self.id = id
+        self.title = title
+        self.content = content
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.isKept = isKept
+        self.aiPrompt = aiPrompt
+        self.aiResponse = aiResponse
+        self.aiRequestDate = aiRequestDate
+        self.aiResponseDate = aiResponseDate
+        self.awaitingAIResponse = awaitingAIResponse
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        content = try container.decode(String.self, forKey: .content)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        isKept = try container.decode(Bool.self, forKey: .isKept)
+        aiPrompt = try container.decodeIfPresent(String.self, forKey: .aiPrompt)
+        aiResponse = try container.decodeIfPresent(String.self, forKey: .aiResponse)
+        aiRequestDate = try container.decodeIfPresent(Date.self, forKey: .aiRequestDate)
+        aiResponseDate = try container.decodeIfPresent(Date.self, forKey: .aiResponseDate)
+        awaitingAIResponse = try container.decodeIfPresent(Bool.self, forKey: .awaitingAIResponse) ?? false
+    }
+}
+
 struct WriteResult {
     var bytesWritten: Int
     var newFileSize: Int
@@ -142,7 +272,7 @@ struct RecoveryIssue: Identifiable, Codable {
 }
 
 struct AppSettings: Codable, Equatable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 4
 
     var schemaVersion: Int
     var hotkey: HotkeyDefinition
@@ -160,6 +290,10 @@ struct AppSettings: Codable, Equatable {
     var obsidianDefaultFolderPath: String
     var obsidianDefaultSummarizeBeforeSave: Bool
     var obsidianTargetVaultName: String
+    var aiAppPath: String
+    var aiPromptTemplate: String
+    var aiAutoSubmit: Bool
+    var defaultPromptID: UUID?
 
     static let `default` = AppSettings(
         schemaVersion: AppSettings.currentSchemaVersion,
@@ -177,7 +311,11 @@ struct AppSettings: Codable, Equatable {
         obsidianIntegrationEnabled: true,
         obsidianDefaultFolderPath: "",
         obsidianDefaultSummarizeBeforeSave: false,
-        obsidianTargetVaultName: ""
+        obsidianTargetVaultName: "",
+        aiAppPath: "",
+        aiPromptTemplate: "Summarize the following text concisely and preserve the key details:",
+        aiAutoSubmit: true,
+        defaultPromptID: nil
     )
 
     enum CodingKeys: String, CodingKey {
@@ -197,6 +335,10 @@ struct AppSettings: Codable, Equatable {
         case obsidianDefaultFolderPath
         case obsidianDefaultSummarizeBeforeSave
         case obsidianTargetVaultName
+        case aiAppPath
+        case aiPromptTemplate
+        case aiAutoSubmit
+        case defaultPromptID
     }
 
     init(
@@ -215,7 +357,11 @@ struct AppSettings: Codable, Equatable {
         obsidianIntegrationEnabled: Bool,
         obsidianDefaultFolderPath: String,
         obsidianDefaultSummarizeBeforeSave: Bool,
-        obsidianTargetVaultName: String
+        obsidianTargetVaultName: String,
+        aiAppPath: String,
+        aiPromptTemplate: String,
+        aiAutoSubmit: Bool,
+        defaultPromptID: UUID?
     ) {
         self.schemaVersion = schemaVersion
         self.hotkey = hotkey
@@ -233,6 +379,10 @@ struct AppSettings: Codable, Equatable {
         self.obsidianDefaultFolderPath = obsidianDefaultFolderPath
         self.obsidianDefaultSummarizeBeforeSave = obsidianDefaultSummarizeBeforeSave
         self.obsidianTargetVaultName = obsidianTargetVaultName
+        self.aiAppPath = aiAppPath
+        self.aiPromptTemplate = aiPromptTemplate
+        self.aiAutoSubmit = aiAutoSubmit
+        self.defaultPromptID = defaultPromptID
     }
 
     init(from decoder: Decoder) throws {
@@ -253,5 +403,9 @@ struct AppSettings: Codable, Equatable {
         obsidianDefaultFolderPath = try c.decodeIfPresent(String.self, forKey: .obsidianDefaultFolderPath) ?? ""
         obsidianDefaultSummarizeBeforeSave = try c.decodeIfPresent(Bool.self, forKey: .obsidianDefaultSummarizeBeforeSave) ?? false
         obsidianTargetVaultName = try c.decodeIfPresent(String.self, forKey: .obsidianTargetVaultName) ?? ""
+        aiAppPath = try c.decodeIfPresent(String.self, forKey: .aiAppPath) ?? ""
+        aiPromptTemplate = try c.decodeIfPresent(String.self, forKey: .aiPromptTemplate) ?? AppSettings.default.aiPromptTemplate
+        aiAutoSubmit = try c.decodeIfPresent(Bool.self, forKey: .aiAutoSubmit) ?? true
+        defaultPromptID = try c.decodeIfPresent(UUID.self, forKey: .defaultPromptID)
     }
 }

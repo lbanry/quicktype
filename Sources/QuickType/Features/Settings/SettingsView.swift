@@ -8,6 +8,9 @@ struct SettingsView: View {
         TabView {
             generalTab
                 .tabItem { Text("General") }
+            PromptLibraryView()
+                .environmentObject(model)
+                .tabItem { Text("Prompts") }
             reliabilityTab
                 .tabItem { Text("Reliability") }
             NotesManagementView()
@@ -16,6 +19,7 @@ struct SettingsView: View {
         }
         .frame(minWidth: 620, minHeight: 420)
         .padding()
+        .glassBackground()
     }
 
     private var generalTab: some View {
@@ -97,6 +101,46 @@ struct SettingsView: View {
                 ))
             }
 
+            HStack {
+                Text("AI Capture Hotkey")
+                Spacer()
+                Text(HotkeyRecorderView.describe(.clipDefault))
+                    .font(.body.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+            Text("AI Automation")
+                .font(.headline)
+
+            HStack {
+                Text("AI App")
+                Spacer()
+                Text(model.settings.aiAppPath.isEmpty ? "Not selected" : URL(fileURLWithPath: model.settings.aiAppPath).lastPathComponent)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Button("Choose") { model.selectAIApplication() }
+                    .glassControl()
+                if !model.settings.aiAppPath.isEmpty {
+                    Button("Clear") { model.clearAIApplication() }
+                        .glassControl()
+                }
+            }
+
+            TextField("AI app path", text: Binding(
+                get: { model.settings.aiAppPath },
+                set: { newValue in model.updateSettings { $0.aiAppPath = newValue } }
+            ))
+
+            Toggle("Auto-submit after paste", isOn: Binding(
+                get: { model.settings.aiAutoSubmit },
+                set: { newValue in model.updateSettings { $0.aiAutoSubmit = newValue } }
+            ))
+
+            Text("Manage reusable prompts in the Prompts tab. Press Return in the prompt picker to use the default prompt.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
             Divider()
             Text("Obsidian Integration")
                 .font(.headline)
@@ -106,10 +150,14 @@ struct SettingsView: View {
                 set: { newValue in model.updateSettings { $0.obsidianIntegrationEnabled = newValue } }
             ))
 
-            TextField("Obsidian default folder path", text: Binding(
-                get: { model.settings.obsidianDefaultFolderPath },
-                set: { newValue in model.updateSettings { $0.obsidianDefaultFolderPath = newValue } }
-            ))
+            HStack {
+                TextField("Obsidian default folder path", text: Binding(
+                    get: { model.settings.obsidianDefaultFolderPath },
+                    set: { newValue in model.updateSettings { $0.obsidianDefaultFolderPath = newValue } }
+                ))
+                Button("Select Path") { model.selectObsidianFolderPath() }
+                    .glassControl()
+            }
 
             TextField("Obsidian target vault name (optional)", text: Binding(
                 get: { model.settings.obsidianTargetVaultName },
@@ -121,6 +169,9 @@ struct SettingsView: View {
                 set: { newValue in model.updateSettings { $0.obsidianDefaultSummarizeBeforeSave = newValue } }
             ))
         }
+        .padding(8)
+        .scrollContentBackground(.hidden)
+        .glassCard()
     }
 
     private var reliabilityTab: some View {
@@ -132,11 +183,16 @@ struct SettingsView: View {
 
             HStack {
                 Button("Run Integrity Scan") { model.refreshRecoveryIssues() }
+                    .glassControl()
                 Button("Restore Latest Backup") { model.restoreLatestBackupForSelectedNote() }
+                    .glassControl()
                 Button("Copy Diagnostics") { model.copyDiagnostics() }
+                    .glassControl()
                 Button("Export Settings") { model.exportSettings() }
+                    .glassControl()
                 Spacer()
                 Button("Delete App Metadata", role: .destructive) { model.deleteAllAppMetadata() }
+                    .glassControl()
             }
 
             if model.recoveryIssues.isEmpty {
@@ -148,7 +204,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 8)
+                .padding(16)
+                .glassCard()
             } else {
                 List(model.recoveryIssues) { issue in
                     HStack {
@@ -162,10 +219,14 @@ struct SettingsView: View {
                         Button("Relink") {
                             model.relinkNote(issue.noteID)
                         }
+                        .glassControl()
                     }
                 }
+                .scrollContentBackground(.hidden)
+                .glassCard()
             }
         }
+        .padding(8)
     }
 
 }

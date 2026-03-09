@@ -40,6 +40,9 @@ final class JSONSettingsStore: SettingsStoreProtocol {
         if migrated.obsidianDefaultFolderPath.isEmpty {
             migrated.obsidianDefaultFolderPath = AppSettings.default.obsidianDefaultFolderPath
         }
+        if migrated.aiPromptTemplate.isEmpty {
+            migrated.aiPromptTemplate = AppSettings.default.aiPromptTemplate
+        }
         return migrated
     }
 }

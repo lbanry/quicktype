@@ -12,18 +12,31 @@ struct QuickTypeApp: App {
         let bookmarkService = BookmarkService()
         let model = AppModel(
             noteRepository: JSONNoteRepository(),
+            clipboardRepository: JSONClipboardRepository(),
+            quickActionRepository: JSONQuickActionRepository(),
+            promptRepository: JSONPromptRepository(),
+            linkRepository: JSONLinkRepository(),
             settingsStore: JSONSettingsStore(),
             bookmarkService: bookmarkService,
             fileWriter: AtomicFileWriter(),
             recoveryService: RecoveryService(bookmarkService: bookmarkService),
             hotkeyService: GlobalHotkeyService(),
-            selectionCaptureService: SelectionCaptureService()
+            selectionCaptureService: SelectionCaptureService(),
+            aiAutomationService: MacAIAutomationService(),
+            frontmostApplicationURLProvider: { NSWorkspace.shared.frontmostApplication?.bundleURL }
         )
         _model = StateObject(wrappedValue: model)
     }
 
+    private func openOrFocusCaptureWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if !appDelegate.focusCaptureWindow() {
+            openWindow(id: "capture")
+        }
+    }
+
     var body: some Scene {
-        WindowGroup("Capture") {
+        WindowGroup("Capture", id: "capture") {
             Group {
                 if model.noteTargets.isEmpty {
                     OnboardingView()
@@ -33,10 +46,14 @@ struct QuickTypeApp: App {
             }
             .environmentObject(model)
             .frame(minWidth: 520, minHeight: 360)
+            .background(
+                WindowAccessor { window in
+                    appDelegate.registerCaptureWindow(window)
+                }
+            )
             .onAppear {
                 model.bootstrap {
-                    NSApp.activate(ignoringOtherApps: true)
-                    openWindow(id: "capture")
+                    openOrFocusCaptureWindow()
                 }
             }
             .onOpenURL { url in
@@ -44,17 +61,16 @@ struct QuickTypeApp: App {
             }
         }
         .defaultSize(width: 620, height: 420)
-        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandMenu("QuickType") {
                 Button("Open Capture") {
-                    NSApp.activate(ignoringOtherApps: true)
-                    openWindow(id: "capture")
+                    openOrFocusCaptureWindow()
                 }
                 .keyboardShortcut("t", modifiers: [.command, .option])
 
-                Button("Copy Selection to New Note") {
-                    model.copyHighlightedTextToNewNote()
+                Button("Send Selection to AI") {
+                    model.sendSelectionToConfiguredAI()
                 }
                 .keyboardShortcut("c", modifiers: [.command, .option, .shift])
 
@@ -62,6 +78,10 @@ struct QuickTypeApp: App {
                     model.saveHighlightedTextToObsidian(summarizeFirst: false)
                 }
                 .keyboardShortcut("o", modifiers: [.command, .option, .shift])
+
+                Button("Choose Obsidian Folder and Save") {
+                    model.chooseObsidianFolderAndSaveHighlightedText(summarizeFirst: false)
+                }
 
                 Button("Summarize and Save to Obsidian") {
                     model.saveHighlightedTextToObsidian(summarizeFirst: true)
@@ -83,18 +103,20 @@ struct QuickTypeApp: App {
 
         MenuBarExtra("QuickType", systemImage: "note.text") {
             Button("Open Capture") {
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "capture")
+                openOrFocusCaptureWindow()
             }
             Button("Open Settings") {
                 NSApp.activate(ignoringOtherApps: true)
                 openWindow(id: "settings-window")
             }
-            Button("Copy Selection to New Note") {
-                model.copyHighlightedTextToNewNote()
+            Button("Send Selection to AI") {
+                model.sendSelectionToConfiguredAI()
             }
             Button("Save Selection to Obsidian") {
                 model.saveHighlightedTextToObsidian(summarizeFirst: false)
+            }
+            Button("Choose Obsidian Folder and Save") {
+                model.chooseObsidianFolderAndSaveHighlightedText(summarizeFirst: false)
             }
             Button("Summarize and Save to Obsidian") {
                 model.saveHighlightedTextToObsidian(summarizeFirst: true)
