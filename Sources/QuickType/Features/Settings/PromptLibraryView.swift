@@ -5,64 +5,49 @@ struct PromptLibraryView: View {
     @State private var editingPrompt: PromptDraft?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Prompt Library")
-                    .font(.title3.bold())
-                Spacer()
-                iconButton(systemName: "plus", helpText: "New prompt") {
-                    editingPrompt = PromptDraft.new
-                }
-            }
-
-            if model.prompts.isEmpty {
-                Text("Add prompts here. `Shift+Cmd+C` will show them and Enter will use the default prompt.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassCard()
-            } else {
-                List {
-                    ForEach(model.prompts) { prompt in
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack(spacing: 8) {
-                                    Text(prompt.title)
-                                        .font(.headline)
-                                    if model.settings.defaultPromptID == prompt.id {
-                                        Text("Default")
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 3)
-                                            .background(.thinMaterial, in: Capsule())
-                                    }
-                                }
-                                Text(prompt.body)
-                                    .font(.body.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(3)
-                            }
-                            Spacer()
-                            iconButton(systemName: "star.fill", helpText: "Set default") {
-                                model.setDefaultPrompt(prompt.id)
-                            }
-                            iconButton(systemName: "pencil", helpText: "Edit prompt") {
-                                editingPrompt = PromptDraft(prompt: prompt)
-                            }
-                            iconButton(systemName: "trash", helpText: "Delete prompt", role: .destructive) {
-                                model.deletePrompt(prompt.id)
-                            }
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("Prompts")
+                        .font(.title3.bold())
+                    Spacer()
+                    Text("\(model.prompts.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 4)
+                        .background(.thinMaterial, in: Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                        )
+                    iconButton(systemName: "plus", helpText: "New prompt") {
+                        editingPrompt = PromptDraft.new
                     }
                 }
-                .scrollContentBackground(.hidden)
-                .glassCard()
+
+                if model.prompts.isEmpty {
+                    Text("Add prompts here. `Shift+Cmd+C` will show them and Enter will use the default prompt.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .glassCard()
+                } else {
+                    ForEach(model.prompts) { prompt in
+                        PromptCard(
+                            prompt: prompt,
+                            isDefault: model.settings.defaultPromptID == prompt.id,
+                            onCopy: { model.copyPrompt(prompt.id) },
+                            onSetDefault: { model.setDefaultPrompt(prompt.id) },
+                            onEdit: { editingPrompt = PromptDraft(prompt: prompt) },
+                            onDelete: { model.deletePrompt(prompt.id) }
+                        )
+                    }
+                }
             }
+            .padding(8)
         }
-        .padding(8)
         .sheet(item: $editingPrompt) { draft in
             PromptEditor(draft: draft)
                 .environmentObject(model)
@@ -71,6 +56,81 @@ struct PromptLibraryView: View {
 
     @ViewBuilder
     private func iconButton(
+        systemName: String,
+        helpText: String,
+        role: ButtonRole? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 28, height: 28)
+                .background(.thinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                )
+        }
+        .buttonStyle(GlassIconButtonStyle())
+        .help(helpText)
+    }
+}
+
+private struct PromptCard: View {
+    let prompt: SavedPrompt
+    let isDefault: Bool
+    let onCopy: () -> Void
+    let onSetDefault: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(prompt.title)
+                            .font(.headline)
+                            .lineLimit(1)
+                        if isDefault {
+                            Text("Default")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(.thinMaterial, in: Capsule())
+                        }
+                    }
+                    Text(prompt.createdAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                actionButton(systemName: "doc.on.doc", helpText: "Copy prompt", action: onCopy)
+                actionButton(systemName: "star.fill", helpText: "Set default", action: onSetDefault)
+                actionButton(systemName: "pencil", helpText: "Edit prompt", action: onEdit)
+                actionButton(systemName: "trash", helpText: "Delete prompt", role: .destructive, action: onDelete)
+            }
+
+            Text(prompt.body)
+                .font(.body.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(4)
+                .textSelection(.enabled)
+
+            HStack {
+                Spacer()
+                Text(prompt.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .glassCard()
+    }
+
+    @ViewBuilder
+    private func actionButton(
         systemName: String,
         helpText: String,
         role: ButtonRole? = nil,

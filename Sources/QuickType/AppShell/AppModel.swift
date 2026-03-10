@@ -384,6 +384,12 @@ final class AppModel: ObservableObject {
         lastStatusMessage = "Default prompt updated."
     }
 
+    func copyPrompt(_ promptID: UUID) {
+        guard let prompt = prompts.first(where: { $0.id == promptID }) else { return }
+        copyTextToPasteboard(prompt.body)
+        lastStatusMessage = "Prompt copied."
+    }
+
     func deleteAllAppMetadata() {
         do {
             if FileManager.default.fileExists(atPath: AppPaths.settingsFile.path) {
@@ -1018,18 +1024,22 @@ final class AppModel: ObservableObject {
             return
         }
 
-        if handleCopiedLinkIfNeeded(text) {
-            return
+        let extractedLinks = extractCopiedLinks(from: text)
+        if handleCopiedLinksIfNeeded(extractedLinks.urls) {
+            if extractedLinks.remainingText.isEmpty {
+                return
+            }
         }
 
-        if recentClipboardItems.first?.content == text || keptClipboardItems.contains(where: { $0.content == text }) {
+        let sanitizedText = extractedLinks.remainingText.isEmpty ? text : extractedLinks.remainingText
+        if recentClipboardItems.first?.content == sanitizedText || keptClipboardItems.contains(where: { $0.content == sanitizedText }) {
             return
         }
 
         let item = ClipboardItem(
             id: UUID(),
-            title: defaultClipboardTitle(for: text),
-            content: text,
+            title: defaultClipboardTitle(for: sanitizedText),
+            content: sanitizedText,
             createdAt: Date(),
             updatedAt: Date(),
             isKept: false
@@ -1087,38 +1097,60 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func handleCopiedLinkIfNeeded(_ text: String) -> Bool {
-        guard let url = normalizedLinkURL(from: text) else {
+    private func handleCopiedLinksIfNeeded(_ urls: [URL]) -> Bool {
+        guard !urls.isEmpty else {
             return false
         }
 
-        if let index = savedLinks.firstIndex(where: { $0.url == url.absoluteString }) {
-            savedLinks[index].updatedAt = Date()
-            lastStatusMessage = "Link already saved."
+        var addedCount = 0
+        var matchedBrowserMetadata = currentBrowserMetadata()
+
+        for url in urls {
+            if let index = savedLinks.firstIndex(where: { $0.url == url.absoluteString }) {
+                savedLinks[index].updatedAt = Date()
+                continue
+            }
+
+            let now = Date()
+            let title: String
+            if matchedBrowserMetadata.url == url.absoluteString, let browserTitle = matchedBrowserMetadata.title {
+                title = browserTitle
+            } else {
+                title = defaultLinkTitle(for: url)
+                fetchPageTitle(for: url)
+            }
+
+            let link = SavedLink(
+                id: UUID(),
+                title: title,
+                url: url.absoluteString,
+                folderPath: "",
+                summary: nil,
+                notes: nil,
+                createdAt: now,
+                updatedAt: now,
+                aiPrompt: nil,
+                aiRequestDate: nil,
+                aiResponseDate: nil,
+                awaitingAIResponse: false
+            )
+            savedLinks.insert(link, at: 0)
+            addedCount += 1
+
+            if matchedBrowserMetadata.url == url.absoluteString {
+                matchedBrowserMetadata = (nil, nil)
+            }
+        }
+
+        guard addedCount > 0 else {
+            lastStatusMessage = urls.count == 1 ? "Link already saved." : "Links already saved."
             persist()
             return true
         }
 
-        let now = Date()
-        let metadata = currentBrowserMetadata(matching: url.absoluteString)
-        let link = SavedLink(
-            id: UUID(),
-            title: metadata.title ?? defaultLinkTitle(for: url),
-            url: url.absoluteString,
-            folderPath: "",
-            summary: nil,
-            notes: nil,
-            createdAt: now,
-            updatedAt: now,
-            aiPrompt: nil,
-            aiRequestDate: nil,
-            aiResponseDate: nil,
-            awaitingAIResponse: false
-        )
-        savedLinks.insert(link, at: 0)
         captureDashboardTab = .links
         persist()
-        lastStatusMessage = "Saved link."
+        lastStatusMessage = addedCount == 1 ? "Saved link." : "Saved \(addedCount) links."
         return true
     }
 
@@ -1140,8 +1172,74 @@ final class AppModel: ObservableObject {
         recentClipboardItems.first(where: { $0.id == itemID })
     }
 
-    private func normalizedLinkURL(from text: String) -> URL? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func extractCopiedLinks(from text: String) -> (urls: [URL], remainingText: String) {
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        var normalizedMatches: [(URL, Range<String.Index>)] = []
+
+        if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+            let matches = detector.matches(in: text, options: [], range: nsRange)
+            normalizedMatches.append(contentsOf: matches.compactMap { match -> (URL, Range<String.Index>)? in
+                guard let url = match.url,
+                      let normalizedURL = normalizedHTTPURL(from: url.absoluteString),
+                      let range = Range(match.range, in: text) else {
+                    return nil
+                }
+                return (normalizedURL, range)
+            })
+        }
+
+        if let domainRegex = try? NSRegularExpression(
+            pattern: #"(?i)\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>()\[\]{}]*)?"#,
+            options: []
+        ) {
+            let domainMatches = domainRegex.matches(in: text, options: [], range: nsRange)
+            for match in domainMatches {
+                guard let range = Range(match.range, in: text) else {
+                    continue
+                }
+
+                if normalizedMatches.contains(where: { $0.1.overlaps(range) }) {
+                    continue
+                }
+
+                let candidate = String(text[range])
+                guard let normalizedURL = normalizedHTTPURL(from: candidate.hasPrefix("http") ? candidate : "https://\(candidate)") else {
+                    continue
+                }
+
+                normalizedMatches.append((normalizedURL, range))
+            }
+        }
+
+        guard !normalizedMatches.isEmpty else {
+            return ([], text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        var remainingText = text
+        for (_, range) in normalizedMatches.reversed() {
+            remainingText.removeSubrange(range)
+        }
+
+        remainingText = remainingText
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\n\n\n", with: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var seen = Set<String>()
+        let urls = normalizedMatches.compactMap { match -> URL? in
+            let url = match.0
+            let absoluteString = url.absoluteString
+            guard seen.insert(absoluteString).inserted else {
+                return nil
+            }
+            return url
+        }
+
+        return (urls, remainingText)
+    }
+
+    private func normalizedHTTPURL(from value: String) -> URL? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed),
               let scheme = url.scheme?.lowercased(),
               ["http", "https"].contains(scheme),
@@ -1174,7 +1272,7 @@ final class AppModel: ObservableObject {
         """
     }
 
-    private func currentBrowserMetadata(matching copiedURL: String) -> (title: String?, url: String?) {
+    private func currentBrowserMetadata() -> (title: String?, url: String?) {
         guard let frontmost = NSWorkspace.shared.frontmostApplication,
               let bundleID = frontmost.bundleIdentifier else {
             return (nil, nil)
@@ -1184,26 +1282,77 @@ final class AppModel: ObservableObject {
         case "com.apple.Safari":
             let url = runAppleScript("tell application \"Safari\" to return URL of front document")
             let title = runAppleScript("tell application \"Safari\" to return name of front document")
-            return url == copiedURL ? (title, url) : (nil, url)
+            return (title, url)
         case "com.google.Chrome":
             let url = runAppleScript("tell application \"Google Chrome\" to return URL of active tab of front window")
             let title = runAppleScript("tell application \"Google Chrome\" to return title of active tab of front window")
-            return url == copiedURL ? (title, url) : (nil, url)
+            return (title, url)
         case "company.thebrowser.Browser":
             let url = runAppleScript("tell application \"Arc\" to return URL of active tab of front window")
             let title = runAppleScript("tell application \"Arc\" to return title of active tab of front window")
-            return url == copiedURL ? (title, url) : (nil, url)
+            return (title, url)
         case "com.brave.Browser":
             let url = runAppleScript("tell application \"Brave Browser\" to return URL of active tab of front window")
             let title = runAppleScript("tell application \"Brave Browser\" to return title of active tab of front window")
-            return url == copiedURL ? (title, url) : (nil, url)
+            return (title, url)
         case "com.microsoft.edgemac":
             let url = runAppleScript("tell application \"Microsoft Edge\" to return URL of active tab of front window")
             let title = runAppleScript("tell application \"Microsoft Edge\" to return title of active tab of front window")
-            return url == copiedURL ? (title, url) : (nil, url)
+            return (title, url)
         default:
             return (nil, nil)
         }
+    }
+
+    private func fetchPageTitle(for url: URL) {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.setValue("QuickType", forHTTPHeaderField: "User-Agent")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+            guard let self, error == nil, let data,
+                  let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1),
+                  let title = Self.parsedHTMLTitle(from: html) else {
+                return
+            }
+
+            Task { @MainActor [weak self] in
+                self?.applyFetchedPageTitle(title, for: url.absoluteString)
+            }
+        }.resume()
+    }
+
+    nonisolated private static func parsedHTMLTitle(from html: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: "<title[^>]*>(.*?)</title>", options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
+            return nil
+        }
+
+        let range = NSRange(html.startIndex..<html.endIndex, in: html)
+        guard let match = regex.firstMatch(in: html, options: [], range: range),
+              let titleRange = Range(match.range(at: 1), in: html) else {
+            return nil
+        }
+
+        let title = html[titleRange]
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
+    }
+
+    private func applyFetchedPageTitle(_ title: String, for urlString: String) {
+        guard let index = savedLinks.firstIndex(where: { $0.url == urlString }) else {
+            return
+        }
+
+        let existingTitle = savedLinks[index].title
+        if existingTitle != defaultLinkTitle(for: URL(string: urlString) ?? URL(fileURLWithPath: "/")) {
+            return
+        }
+
+        savedLinks[index].title = title
+        savedLinks[index].updatedAt = Date()
+        persist()
     }
 
     private func runAppleScript(_ source: String) -> String? {

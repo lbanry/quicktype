@@ -31,6 +31,9 @@ struct CaptureView: View {
                     ClipboardView()
                 case .links:
                     LinksView()
+                case .prompts:
+                    PromptLibraryView()
+                        .padding()
                 }
             }
         }
@@ -66,10 +69,11 @@ struct CaptureView: View {
                 utilityButton(systemName: "gearshape", helpText: "Settings") {
                     openWindow(id: "settings-window")
                 }
+                tabButton(systemName: "sparkles", tab: .prompts, helpText: "Prompts")
                 tabButton(systemName: "link", tab: .links, helpText: "Links")
                 tabButton(systemName: "doc.on.clipboard", tab: .paste, helpText: "Paste")
             }
-            .frame(width: 148, alignment: .trailing)
+            .frame(width: 186, alignment: .trailing)
         }
     }
 

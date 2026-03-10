@@ -114,6 +114,7 @@ enum CaptureDashboardTab: String, Identifiable {
     case actions
     case paste
     case links
+    case prompts
 
     var id: String { rawValue }
 }
