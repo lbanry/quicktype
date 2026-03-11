@@ -23,6 +23,7 @@ final class AppModel: ObservableObject {
     @Published var recentClipboardItems: [ClipboardItem] = []
     @Published var keptClipboardItems: [ClipboardItem] = []
     @Published var recoveryIssues: [RecoveryIssue] = []
+    @Published var isHeaderKeyboardFocusActive = false
     @Published var lastStatusMessage = ""
 
     let noteRepository: NoteRepositoryProtocol
@@ -520,6 +521,19 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func copyQuickAction(_ actionID: UUID) {
+        guard let action = quickActions.first(where: { $0.id == actionID }) else { return }
+
+        do {
+            let output = try quickActionOutput(for: action)
+            copyTextToPasteboard(output)
+            lastStatusMessage = "Quick action copied to clipboard."
+        } catch {
+            Logger.error("Copy quick action failed: \(error.localizedDescription)")
+            lastStatusMessage = error.localizedDescription
+        }
+    }
+
     func copyClipboardItem(_ itemID: UUID) {
         guard let item = clipboardItem(with: itemID) else { return }
         copyTextToPasteboard(item.content)
@@ -635,6 +649,12 @@ final class AppModel: ObservableObject {
         guard let link = savedLinks.first(where: { $0.id == linkID }),
               let url = URL(string: link.url) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    func copySavedLink(_ linkID: UUID) {
+        guard let link = savedLinks.first(where: { $0.id == linkID }) else { return }
+        copyTextToPasteboard(link.url)
+        lastStatusMessage = "Link copied."
     }
 
     func deleteSavedLink(_ linkID: UUID) {

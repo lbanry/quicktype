@@ -1,8 +1,11 @@
+import AppKit
 import SwiftUI
 
 struct PromptLibraryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var editingPrompt: PromptDraft?
+    @State private var selectedPromptID: UUID?
+    @State private var keyMonitor: Any?
 
     var body: some View {
         ScrollView {
@@ -38,6 +41,7 @@ struct PromptLibraryView: View {
                         PromptCard(
                             prompt: prompt,
                             isDefault: model.settings.defaultPromptID == prompt.id,
+                            isSelected: selectedPromptID == prompt.id,
                             onCopy: { model.copyPrompt(prompt.id) },
                             onSetDefault: { model.setDefaultPrompt(prompt.id) },
                             onEdit: { editingPrompt = PromptDraft(prompt: prompt) },
@@ -51,6 +55,16 @@ struct PromptLibraryView: View {
         .sheet(item: $editingPrompt) { draft in
             PromptEditor(draft: draft)
                 .environmentObject(model)
+        }
+        .onAppear {
+            syncSelection()
+            installKeyboardMonitor()
+        }
+        .onDisappear {
+            removeKeyboardMonitor()
+        }
+        .onChange(of: model.prompts) { _ in
+            syncSelection()
         }
     }
 
@@ -74,11 +88,95 @@ struct PromptLibraryView: View {
         .buttonStyle(GlassIconButtonStyle())
         .help(helpText)
     }
+
+    private func syncSelection() {
+        if let selectedPromptID, model.prompts.contains(where: { $0.id == selectedPromptID }) {
+            return
+        }
+        selectedPromptID = model.prompts.first?.id
+    }
+
+    private func installKeyboardMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard editingPrompt == nil else { return event }
+            guard !model.isHeaderKeyboardFocusActive else { return event }
+
+            if event.modifierFlags.contains(.command),
+               Int(event.keyCode) == 51 {
+                deleteSelectedPrompt()
+                return nil
+            }
+
+            if event.modifierFlags.contains(.command),
+               event.charactersIgnoringModifiers?.lowercased() == "c" {
+                copySelectedPrompt()
+                return nil
+            }
+
+            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
+                return event
+            }
+
+            switch Int(event.keyCode) {
+            case 48, 125:
+                moveSelection(delta: 1)
+                return nil
+            case 49:
+                setDefaultPrompt()
+                return nil
+            case 36, 76:
+                editSelectedPrompt()
+                return nil
+            case 126:
+                moveSelection(delta: -1)
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeKeyboardMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+    }
+
+    private func moveSelection(delta: Int) {
+        guard !model.prompts.isEmpty else { return }
+        let currentIndex = model.prompts.firstIndex(where: { $0.id == selectedPromptID }) ?? 0
+        let nextIndex = min(max(currentIndex + delta, 0), model.prompts.count - 1)
+        selectedPromptID = model.prompts[nextIndex].id
+    }
+
+    private func setDefaultPrompt() {
+        guard let selectedPromptID else { return }
+        model.setDefaultPrompt(selectedPromptID)
+    }
+
+    private func editSelectedPrompt() {
+        guard let selectedPromptID,
+              let prompt = model.prompts.first(where: { $0.id == selectedPromptID }) else { return }
+        editingPrompt = PromptDraft(prompt: prompt)
+    }
+
+    private func copySelectedPrompt() {
+        guard let selectedPromptID else { return }
+        model.copyPrompt(selectedPromptID)
+    }
+
+    private func deleteSelectedPrompt() {
+        guard let selectedPromptID else { return }
+        model.deletePrompt(selectedPromptID)
+    }
 }
 
 private struct PromptCard: View {
     let prompt: SavedPrompt
     let isDefault: Bool
+    let isSelected: Bool
     let onCopy: () -> Void
     let onSetDefault: () -> Void
     let onEdit: () -> Void
@@ -127,6 +225,10 @@ private struct PromptCard: View {
         }
         .padding(14)
         .glassCard()
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
+        )
     }
 
     @ViewBuilder

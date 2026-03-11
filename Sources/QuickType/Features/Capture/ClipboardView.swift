@@ -5,6 +5,8 @@ struct ClipboardView: View {
     @EnvironmentObject private var model: AppModel
     @State private var editingItem: ClipboardItem?
     @State private var keyMonitor: Any?
+    @State private var selectedSection: ClipboardSection = .kept
+    @State private var selectedItemID: UUID?
 
     var body: some View {
         ScrollView {
@@ -30,10 +32,17 @@ struct ClipboardView: View {
             }
         }
         .onAppear {
+            syncSelection()
             installKeyboardMonitor()
         }
         .onDisappear {
             removeKeyboardMonitor()
+        }
+        .onChange(of: model.keptClipboardItems) { _ in
+            syncSelection()
+        }
+        .onChange(of: model.recentClipboardItems) { _ in
+            syncSelection()
         }
     }
 
@@ -74,6 +83,7 @@ struct ClipboardView: View {
                     ClipboardItemCard(
                         item: item,
                         shortcutLabel: title == "Kept" ? shortcutLabel(for: item, within: items) : nil,
+                        isSelected: selectedItemID == item.id,
                         onInsert: { model.insertClipboardItem(item.id) },
                         onCopy: { model.copyClipboardItem(item.id) },
                         onSummarize: { model.summarizeClipboardItemWithAI(item.id) },
@@ -105,15 +115,51 @@ struct ClipboardView: View {
     private func installKeyboardMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard editingItem == nil,
-                  event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
-                  let characters = event.charactersIgnoringModifiers,
-                  let index = shortcutIndex(for: characters) else {
+            guard editingItem == nil else { return event }
+            guard !model.isHeaderKeyboardFocusActive else { return event }
+
+            if event.modifierFlags.contains(.command),
+               Int(event.keyCode) == 51 {
+                deleteSelectedItem()
+                return nil
+            }
+
+            if event.modifierFlags.contains(.command),
+               event.charactersIgnoringModifiers?.lowercased() == "c" {
+                copySelectedItem()
+                return nil
+            }
+
+            if event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
+               let characters = event.charactersIgnoringModifiers,
+               let index = shortcutIndex(for: characters) {
+                model.insertKeptClipboardItem(atShortcutIndex: index)
+                return nil
+            }
+
+            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
                 return event
             }
 
-            model.insertKeptClipboardItem(atShortcutIndex: index)
-            return nil
+            switch Int(event.keyCode) {
+            case 48:
+                advanceSection()
+                return nil
+            case 49:
+                activateSelectedItem()
+                return nil
+            case 36, 76:
+                editSelectedItem()
+                return nil
+            case 125:
+                moveSelection(delta: 1)
+                return nil
+            case 126:
+                moveSelection(delta: -1)
+                return nil
+            default:
+                return event
+            }
         }
     }
 
@@ -139,11 +185,87 @@ struct ClipboardView: View {
         default: nil
         }
     }
+
+    private func syncSelection() {
+        let kept = model.keptClipboardItems
+        let recent = model.recentClipboardItems
+
+        if case .kept = selectedSection, kept.isEmpty, !recent.isEmpty {
+            selectedSection = .recent
+        } else if case .recent = selectedSection, recent.isEmpty, !kept.isEmpty {
+            selectedSection = .kept
+        }
+
+        let items = itemsForSelectedSection()
+        if let selectedItemID, items.contains(where: { $0.id == selectedItemID }) {
+            return
+        }
+        selectedItemID = items.first?.id
+    }
+
+    private func itemsForSelectedSection() -> [ClipboardItem] {
+        switch selectedSection {
+        case .kept:
+            return model.keptClipboardItems
+        case .recent:
+            return model.recentClipboardItems
+        }
+    }
+
+    private func advanceSection() {
+        let order: [ClipboardSection] = [.kept, .recent]
+        guard let currentIndex = order.firstIndex(of: selectedSection) else { return }
+
+        for offset in 1...order.count {
+            let candidate = order[(currentIndex + offset) % order.count]
+            let hasItems = candidate == .kept ? !model.keptClipboardItems.isEmpty : !model.recentClipboardItems.isEmpty
+            if hasItems {
+                selectedSection = candidate
+                selectedItemID = itemsForSelectedSection().first?.id
+                break
+            }
+        }
+    }
+
+    private func moveSelection(delta: Int) {
+        let items = itemsForSelectedSection()
+        guard !items.isEmpty else { return }
+        let currentIndex = items.firstIndex(where: { $0.id == selectedItemID }) ?? 0
+        let nextIndex = min(max(currentIndex + delta, 0), items.count - 1)
+        selectedItemID = items[nextIndex].id
+    }
+
+    private func activateSelectedItem() {
+        guard let selectedItemID else { return }
+        model.insertClipboardItem(selectedItemID)
+    }
+
+    private func editSelectedItem() {
+        guard let selectedItemID else { return }
+        editingItem = model.keptClipboardItems.first(where: { $0.id == selectedItemID })
+            ?? model.recentClipboardItems.first(where: { $0.id == selectedItemID })
+    }
+
+    private func copySelectedItem() {
+        guard let selectedItemID else { return }
+        model.copyClipboardItem(selectedItemID)
+    }
+
+    private func deleteSelectedItem() {
+        guard let selectedItemID else { return }
+        model.deleteClipboardItem(selectedItemID)
+    }
+}
+
+private enum ClipboardSection {
+    case kept
+    case recent
 }
 
 private struct ClipboardItemCard: View {
     let item: ClipboardItem
     let shortcutLabel: String?
+    let isSelected: Bool
     let onInsert: () -> Void
     let onCopy: () -> Void
     let onSummarize: () -> Void
@@ -224,6 +346,10 @@ private struct ClipboardItemCard: View {
         }
         .padding(14)
         .glassCard()
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
+        )
     }
 
     @ViewBuilder

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct CaptureView: View {
@@ -6,6 +7,8 @@ struct CaptureView: View {
     @Environment(\.openWindow) private var openWindow
     @FocusState private var editorFocused: Bool
     @State private var showCommandPalette = false
+    @State private var keyMonitor: Any?
+    @State private var selectedHeaderControl: HeaderControl = .paste
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,6 +51,16 @@ struct CaptureView: View {
         }
         .onAppear {
             editorFocused = true
+            syncSelectedHeaderControl()
+            model.isHeaderKeyboardFocusActive = true
+            installKeyboardMonitor()
+        }
+        .onDisappear {
+            model.isHeaderKeyboardFocusActive = false
+            removeKeyboardMonitor()
+        }
+        .onChange(of: model.captureDashboardTab) { _ in
+            syncSelectedHeaderControl()
         }
     }
 
@@ -65,13 +78,13 @@ struct CaptureView: View {
             Spacer()
 
             HStack(spacing: 10) {
-                tabButton(systemName: "square.grid.2x2.fill", tab: .actions, helpText: "Actions")
-                utilityButton(systemName: "gearshape", helpText: "Settings") {
+                tabButton(systemName: "square.grid.2x2.fill", tab: .actions, helpText: "Actions", headerControl: .actions)
+                utilityButton(systemName: "gearshape", helpText: "Settings", headerControl: .settings) {
                     openWindow(id: "settings-window")
                 }
-                tabButton(systemName: "sparkles", tab: .prompts, helpText: "Prompts")
-                tabButton(systemName: "link", tab: .links, helpText: "Links")
-                tabButton(systemName: "doc.on.clipboard", tab: .paste, helpText: "Paste")
+                tabButton(systemName: "sparkles", tab: .prompts, helpText: "Prompts", headerControl: .prompts)
+                tabButton(systemName: "link", tab: .links, helpText: "Links", headerControl: .links)
+                tabButton(systemName: "doc.on.clipboard", tab: .paste, helpText: "Paste", headerControl: .paste)
             }
             .frame(width: 186, alignment: .trailing)
         }
@@ -145,9 +158,10 @@ struct CaptureView: View {
     }
 
     @ViewBuilder
-    private func tabButton(systemName: String, tab: CaptureDashboardTab, helpText: String) -> some View {
+    private func tabButton(systemName: String, tab: CaptureDashboardTab, helpText: String, headerControl: HeaderControl) -> some View {
         Button {
             model.captureDashboardTab = tab
+            selectedHeaderControl = headerControl
         } label: {
             Image(systemName: systemName)
                 .font(.system(size: 13, weight: .semibold))
@@ -159,7 +173,9 @@ struct CaptureView: View {
                 .overlay(
                     Circle()
                         .stroke(
-                            model.captureDashboardTab == tab ? Color.white.opacity(0.32) : Color.white.opacity(0.18),
+                            selectedHeaderControl == headerControl
+                                ? Color.white.opacity(0.4)
+                                : (model.captureDashboardTab == tab ? Color.white.opacity(0.32) : Color.white.opacity(0.18)),
                             lineWidth: 1
                         )
                 )
@@ -169,7 +185,7 @@ struct CaptureView: View {
     }
 
     @ViewBuilder
-    private func utilityButton(systemName: String, helpText: String, action: @escaping () -> Void) -> some View {
+    private func utilityButton(systemName: String, helpText: String, headerControl: HeaderControl, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 13, weight: .semibold))
@@ -177,11 +193,95 @@ struct CaptureView: View {
                 .background(.thinMaterial, in: Circle())
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                        .stroke(selectedHeaderControl == headerControl ? Color.white.opacity(0.4) : Color.white.opacity(0.18), lineWidth: 1)
                 )
         }
         .buttonStyle(GlassIconButtonStyle())
         .help(helpText)
+    }
+
+    private func installKeyboardMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard !showCommandPalette, !model.isPromptPickerPresented else {
+                return event
+            }
+
+            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
+                return event
+            }
+
+            switch Int(event.keyCode) {
+            case 123:
+                model.isHeaderKeyboardFocusActive = true
+                moveHeaderSelection(delta: -1)
+                return nil
+            case 124:
+                model.isHeaderKeyboardFocusActive = true
+                moveHeaderSelection(delta: 1)
+                return nil
+            case 49:
+                activateSelectedHeaderControl()
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeKeyboardMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+    }
+
+    private func syncSelectedHeaderControl() {
+        selectedHeaderControl = HeaderControl(tab: model.captureDashboardTab)
+    }
+
+    private func moveHeaderSelection(delta: Int) {
+        let controls = HeaderControl.allCases
+        guard let currentIndex = controls.firstIndex(of: selectedHeaderControl) else { return }
+        let nextIndex = (currentIndex + delta + controls.count) % controls.count
+        selectedHeaderControl = controls[nextIndex]
+    }
+
+    private func activateSelectedHeaderControl() {
+        model.isHeaderKeyboardFocusActive = false
+        switch selectedHeaderControl {
+        case .actions:
+            model.captureDashboardTab = .actions
+        case .settings:
+            openWindow(id: "settings-window")
+        case .prompts:
+            model.captureDashboardTab = .prompts
+        case .links:
+            model.captureDashboardTab = .links
+        case .paste:
+            model.captureDashboardTab = .paste
+        }
+    }
+}
+
+private enum HeaderControl: CaseIterable {
+    case actions
+    case settings
+    case prompts
+    case links
+    case paste
+
+    init(tab: CaptureDashboardTab) {
+        switch tab {
+        case .actions:
+            self = .actions
+        case .paste:
+            self = .paste
+        case .links:
+            self = .links
+        case .prompts:
+            self = .prompts
+        }
     }
 }
 

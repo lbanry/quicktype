@@ -1,8 +1,11 @@
+import AppKit
 import SwiftUI
 
 struct QuickActionsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var editingAction: QuickActionDraft?
+    @State private var selectedActionID: UUID?
+    @State private var keyMonitor: Any?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -38,6 +41,7 @@ struct QuickActionsView: View {
                     QuickActionCard(
                         action: action,
                         clipTitle: clipTitle(for: action.clipboardItemID),
+                        isSelected: selectedActionID == action.id,
                         onRun: { model.runQuickAction(action.id) },
                         onDuplicate: { model.duplicateQuickAction(action.id) },
                         onEdit: { editingAction = QuickActionDraft(action: action) },
@@ -50,6 +54,16 @@ struct QuickActionsView: View {
             QuickActionEditor(draft: draft)
                 .environmentObject(model)
         }
+        .onAppear {
+            syncSelection()
+            installKeyboardMonitor()
+        }
+        .onDisappear {
+            removeKeyboardMonitor()
+        }
+        .onChange(of: model.quickActions) { _ in
+            syncSelection()
+        }
     }
 
     private func clipTitle(for itemID: UUID?) -> String? {
@@ -57,11 +71,95 @@ struct QuickActionsView: View {
         return model.keptClipboardItems.first(where: { $0.id == itemID })?.title
             ?? model.recentClipboardItems.first(where: { $0.id == itemID })?.title
     }
+
+    private func syncSelection() {
+        if let selectedActionID, model.quickActions.contains(where: { $0.id == selectedActionID }) {
+            return
+        }
+        selectedActionID = model.quickActions.first?.id
+    }
+
+    private func installKeyboardMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard editingAction == nil else { return event }
+            guard !model.isHeaderKeyboardFocusActive else { return event }
+
+            if event.modifierFlags.contains(.command),
+               Int(event.keyCode) == 51 {
+                deleteSelectedAction()
+                return nil
+            }
+
+            if event.modifierFlags.contains(.command),
+               event.charactersIgnoringModifiers?.lowercased() == "c" {
+                copySelectedAction()
+                return nil
+            }
+
+            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
+                return event
+            }
+
+            switch Int(event.keyCode) {
+            case 48, 125:
+                moveSelection(delta: 1)
+                return nil
+            case 49:
+                runSelectedAction()
+                return nil
+            case 36, 76:
+                editSelectedAction()
+                return nil
+            case 126:
+                moveSelection(delta: -1)
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeKeyboardMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+    }
+
+    private func moveSelection(delta: Int) {
+        guard !model.quickActions.isEmpty else { return }
+        let currentIndex = model.quickActions.firstIndex(where: { $0.id == selectedActionID }) ?? 0
+        let nextIndex = min(max(currentIndex + delta, 0), model.quickActions.count - 1)
+        selectedActionID = model.quickActions[nextIndex].id
+    }
+
+    private func runSelectedAction() {
+        guard let selectedActionID else { return }
+        model.runQuickAction(selectedActionID)
+    }
+
+    private func editSelectedAction() {
+        guard let selectedActionID,
+              let action = model.quickActions.first(where: { $0.id == selectedActionID }) else { return }
+        editingAction = QuickActionDraft(action: action)
+    }
+
+    private func copySelectedAction() {
+        guard let selectedActionID else { return }
+        model.copyQuickAction(selectedActionID)
+    }
+
+    private func deleteSelectedAction() {
+        guard let selectedActionID else { return }
+        model.deleteQuickAction(selectedActionID)
+    }
 }
 
 private struct QuickActionCard: View {
     let action: QuickAction
     let clipTitle: String?
+    let isSelected: Bool
     let onRun: () -> Void
     let onDuplicate: () -> Void
     let onEdit: () -> Void
@@ -99,6 +197,10 @@ private struct QuickActionCard: View {
         }
         .padding(14)
         .glassCard()
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
+        )
     }
 
     private var detailText: String {

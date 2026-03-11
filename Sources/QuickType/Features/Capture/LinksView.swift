@@ -5,6 +5,9 @@ struct LinksView: View {
     @State private var selectedFolderPath = ""
     @State private var editingLink: SavedLink?
     @State private var newFolderName = ""
+    @State private var selectedLinkID: UUID?
+    @State private var focusedArea: LinksFocusArea = .links
+    @State private var keyMonitor: Any?
 
     var body: some View {
         HStack(spacing: 16) {
@@ -62,6 +65,7 @@ struct LinksView: View {
                             ForEach(filteredLinks) { link in
                                 LinkCard(
                                     link: link,
+                                    isSelected: selectedLinkID == link.id,
                                     onOpen: { model.openSavedLink(link.id) },
                                     onSummarize: { model.summarizeSavedLinkWithAI(link.id) },
                                     onEdit: { editingLink = link },
@@ -83,6 +87,17 @@ struct LinksView: View {
             if selectedFolderPath.isEmpty, !folderPaths.contains("") {
                 selectedFolderPath = folderPaths.first ?? ""
             }
+            syncSelection()
+            installKeyboardMonitor()
+        }
+        .onDisappear {
+            removeKeyboardMonitor()
+        }
+        .onChange(of: selectedFolderPath) { _ in
+            syncSelection()
+        }
+        .onChange(of: model.savedLinks) { _ in
+            syncSelection()
         }
     }
 
@@ -105,10 +120,127 @@ struct LinksView: View {
             .filter { !$0.isEmpty }
             .joined(separator: "/")
     }
+
+    private func syncSelection() {
+        let links = filteredLinks
+        if let selectedLinkID, links.contains(where: { $0.id == selectedLinkID }) {
+            return
+        }
+        selectedLinkID = links.first?.id
+        if links.isEmpty {
+            focusedArea = .folders
+        }
+    }
+
+    private func installKeyboardMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard editingLink == nil else { return event }
+            guard !model.isHeaderKeyboardFocusActive else { return event }
+
+            if event.modifierFlags.contains(.command),
+               Int(event.keyCode) == 51 {
+                deleteSelectedLink()
+                return nil
+            }
+
+            if event.modifierFlags.contains(.command),
+               event.charactersIgnoringModifiers?.lowercased() == "c" {
+                copySelectedLink()
+                return nil
+            }
+
+            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
+                return event
+            }
+
+            switch Int(event.keyCode) {
+            case 48:
+                focusedArea = focusedArea == .folders ? .links : .folders
+                return nil
+            case 49:
+                confirmSelection()
+                return nil
+            case 36, 76:
+                openOrEditSelection()
+                return nil
+            case 125:
+                moveSelection(delta: 1)
+                return nil
+            case 126:
+                moveSelection(delta: -1)
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeKeyboardMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+    }
+
+    private func moveSelection(delta: Int) {
+        switch focusedArea {
+        case .folders:
+            let folders = folderPaths
+            guard !folders.isEmpty else { return }
+            let currentIndex = folders.firstIndex(of: selectedFolderPath) ?? 0
+            let nextIndex = min(max(currentIndex + delta, 0), folders.count - 1)
+            selectedFolderPath = folders[nextIndex]
+        case .links:
+            let links = filteredLinks
+            guard !links.isEmpty else { return }
+            let currentIndex = links.firstIndex(where: { $0.id == selectedLinkID }) ?? 0
+            let nextIndex = min(max(currentIndex + delta, 0), links.count - 1)
+            selectedLinkID = links[nextIndex].id
+        }
+    }
+
+    private func confirmSelection() {
+        if focusedArea == .links {
+            openSelectedLink()
+        }
+    }
+
+    private func openOrEditSelection() {
+        if focusedArea == .folders {
+            focusedArea = .links
+            syncSelection()
+            return
+        }
+
+        guard let selectedLinkID else { return }
+        editingLink = filteredLinks.first(where: { $0.id == selectedLinkID })
+    }
+
+    private func openSelectedLink() {
+        guard let selectedLinkID else { return }
+        model.openSavedLink(selectedLinkID)
+    }
+
+    private func copySelectedLink() {
+        guard focusedArea == .links, let selectedLinkID else { return }
+        model.copySavedLink(selectedLinkID)
+    }
+
+    private func deleteSelectedLink() {
+        guard focusedArea == .links, let selectedLinkID else { return }
+        model.deleteSavedLink(selectedLinkID)
+    }
+}
+
+private enum LinksFocusArea {
+    case folders
+    case links
 }
 
 private struct LinkCard: View {
     let link: SavedLink
+    let isSelected: Bool
     let onOpen: () -> Void
     let onSummarize: () -> Void
     let onEdit: () -> Void
@@ -160,6 +292,10 @@ private struct LinkCard: View {
         }
         .padding(14)
         .glassCard()
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
+        )
     }
 
     private func badge(_ text: String) -> some View {
