@@ -13,6 +13,7 @@ struct PromptLibraryView: View {
                 HStack {
                     Text("Prompts")
                         .font(.title3.bold())
+                        .help("Use Up/Down to move, Space to set default, Return to edit, Cmd+C to copy, Cmd+Delete to delete.")
                     Spacer()
                     Text("\(model.prompts.count)")
                         .font(.caption.weight(.semibold))
@@ -229,6 +230,7 @@ private struct PromptCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
         )
+        .help("Prompt: Space set default, Return edit, Cmd+C copy, Cmd+Delete delete")
     }
 
     @ViewBuilder

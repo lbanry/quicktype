@@ -109,7 +109,7 @@ final class AppModel: ObservableObject {
                     openCaptureWindow()
                 }
             }
-            hotkeyService.start(with: settings.hotkey, clipHotkey: .clipDefault)
+            hotkeyService.start(with: settings.hotkey, clipHotkey: settings.aiCaptureHotkey)
             hotkeyService.setQuickActionHotkeys(quickActions) { [weak self] actionID in
                 Task { @MainActor [weak self] in
                     self?.runQuickAction(actionID)
@@ -309,7 +309,7 @@ final class AppModel: ObservableObject {
         settings = updated
         persist()
         hotkeyService.update(hotkey: settings.hotkey)
-        hotkeyService.update(clipHotkey: .clipDefault)
+        hotkeyService.update(clipHotkey: settings.aiCaptureHotkey)
         if settings.launchAtLogin {
             LaunchAtLoginService.setEnabled(true)
         } else {

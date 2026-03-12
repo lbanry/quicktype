@@ -150,6 +150,7 @@ struct CaptureView: View {
                 .glassControl()
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(model.noteTargets.isEmpty)
+                .help("Save note (Cmd+Return)")
             }
         }
         .padding(.horizontal, 14)
@@ -181,7 +182,7 @@ struct CaptureView: View {
                 )
         }
         .buttonStyle(GlassIconButtonStyle())
-        .help(helpText)
+        .help("\(helpText) (navigate header with Left/Right, activate with Space)")
     }
 
     @ViewBuilder
@@ -197,7 +198,7 @@ struct CaptureView: View {
                 )
         }
         .buttonStyle(GlassIconButtonStyle())
-        .help(helpText)
+        .help("\(helpText) (navigate header with Left/Right, activate with Space)")
     }
 
     private func installKeyboardMonitor() {

@@ -12,6 +12,7 @@ struct QuickActionsView: View {
             HStack {
                 Text("Actions")
                     .font(.title3.bold())
+                    .help("Use Up/Down to move, Space to run, Return to edit, Cmd+C to copy, Cmd+Delete to delete.")
                 Spacer()
                 Text("\(model.quickActions.count)")
                     .font(.caption.weight(.semibold))
@@ -27,6 +28,7 @@ struct QuickActionsView: View {
                     editingAction = QuickActionDraft.new
                 }
                 .glassControl()
+                .help("Create a new action")
             }
 
             if model.quickActions.isEmpty {
@@ -201,6 +203,7 @@ private struct QuickActionCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
         )
+        .help("Action: Space run, Return edit, Cmd+C copy output, Cmd+Delete delete")
     }
 
     private var detailText: String {

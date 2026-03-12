@@ -64,15 +64,13 @@ struct QuickTypeApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandMenu("QuickType") {
-                Button("Open Capture") {
+                commandButton("Open Capture", hotkey: model.settings.hotkey) {
                     openOrFocusCaptureWindow()
                 }
-                .keyboardShortcut("t", modifiers: [.command, .option])
 
-                Button("Send Selection to AI") {
+                commandButton("Send Selection to AI", hotkey: model.settings.aiCaptureHotkey) {
                     model.sendSelectionToConfiguredAI()
                 }
-                .keyboardShortcut("c", modifiers: [.command, .option, .shift])
 
                 Button("Save Selection to Obsidian") {
                     model.saveHighlightedTextToObsidian(summarizeFirst: false)
@@ -131,6 +129,16 @@ struct QuickTypeApp: App {
             }
             Divider()
             Button("Quit") { NSApp.terminate(nil) }
+        }
+    }
+
+    @ViewBuilder
+    private func commandButton(_ title: String, hotkey: HotkeyDefinition?, action: @escaping () -> Void) -> some View {
+        if let shortcut = hotkey?.menuShortcut {
+            Button(title, action: action)
+                .keyboardShortcut(shortcut.key, modifiers: shortcut.modifiers)
+        } else {
+            Button(title, action: action)
         }
     }
 }

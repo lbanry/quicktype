@@ -104,9 +104,17 @@ struct SettingsView: View {
             HStack {
                 Text("AI Capture Hotkey")
                 Spacer()
-                Text(HotkeyRecorderView.describe(.clipDefault))
-                    .font(.body.monospaced())
-                    .foregroundStyle(.secondary)
+                HotkeyRecorderView(hotkey: Binding(
+                    get: { model.settings.aiCaptureHotkey },
+                    set: { newValue in
+                        let hasModifier =
+                            (newValue.modifiers & UInt32(cmdKey)) != 0 ||
+                            (newValue.modifiers & UInt32(optionKey)) != 0 ||
+                            (newValue.modifiers & UInt32(controlKey)) != 0
+                        guard hasModifier else { return }
+                        model.updateSettings { $0.aiCaptureHotkey = newValue }
+                    }
+                ))
             }
 
             Divider()

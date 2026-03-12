@@ -15,6 +15,7 @@ struct LinksView: View {
                 HStack {
                     Text("Folders")
                         .font(.title3.bold())
+                        .help("Use Tab to switch between folders and links. Use Up/Down to move.")
                     Spacer()
                 }
 
@@ -43,6 +44,7 @@ struct LinksView: View {
                 HStack {
                     Text(selectedFolderPath.isEmpty ? "All Links" : selectedFolderPath)
                         .font(.title3.bold())
+                        .help("Use Up/Down to move, Space to open, Return to edit, Cmd+C to copy, Cmd+Delete to delete.")
                     Spacer()
                     Text("\(filteredLinks.count)")
                         .font(.caption.weight(.semibold))
@@ -296,6 +298,7 @@ private struct LinkCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
         )
+        .help("Link: Space open, Return edit, Cmd+C copy URL, Cmd+Delete delete")
     }
 
     private func badge(_ text: String) -> some View {

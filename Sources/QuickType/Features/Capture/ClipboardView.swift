@@ -52,12 +52,16 @@ struct ClipboardView: View {
             HStack {
                 Text(title)
                     .font(.title3.bold())
+                    .help(title == "Kept"
+                        ? "Use Tab to switch sections, Up/Down to move, Space to insert, Return to edit, Cmd+C to copy, Cmd+Delete to delete."
+                        : "Use Tab to switch sections, Up/Down to move, Space to insert, Return to edit, Cmd+C to copy, Cmd+Delete to delete.")
                 Spacer()
                 if title == "Recent", !items.isEmpty {
                     Button("Clear Recent") {
                         model.clearRecentClipboardItems()
                     }
                     .glassControl()
+                    .help("Clear recent clipboard items")
                 }
                 Text("\(items.count)")
                     .font(.caption.weight(.semibold))
@@ -350,6 +354,7 @@ private struct ClipboardItemCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
         )
+        .help("Clipboard item: Space insert, Return edit, Cmd+C copy, Cmd+Delete delete")
     }
 
     @ViewBuilder
@@ -370,7 +375,7 @@ private struct ClipboardItemCard: View {
                 )
         }
         .buttonStyle(GlassIconButtonStyle())
-        .help(helpText)
+        .help("\(helpText)")
     }
 }
 

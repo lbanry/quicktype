@@ -24,6 +24,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(migrated.aiPromptTemplate, AppSettings.default.aiPromptTemplate)
         XCTAssertEqual(migrated.aiAppPath, "")
         XCTAssertTrue(migrated.aiAutoSubmit)
+        XCTAssertEqual(migrated.aiCaptureHotkey, AppSettings.default.aiCaptureHotkey)
     }
 }
 #endif

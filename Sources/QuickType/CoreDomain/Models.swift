@@ -273,10 +273,11 @@ struct RecoveryIssue: Identifiable, Codable {
 }
 
 struct AppSettings: Codable, Equatable {
-    static let currentSchemaVersion = 4
+    static let currentSchemaVersion = 5
 
     var schemaVersion: Int
     var hotkey: HotkeyDefinition
+    var aiCaptureHotkey: HotkeyDefinition
     var insertionPosition: InsertionPosition
     var timestampMode: TimestampMode
     var customDateFormat: String
@@ -299,6 +300,7 @@ struct AppSettings: Codable, Equatable {
     static let `default` = AppSettings(
         schemaVersion: AppSettings.currentSchemaVersion,
         hotkey: .default,
+        aiCaptureHotkey: .clipDefault,
         insertionPosition: .bottom,
         timestampMode: .dateTime,
         customDateFormat: "yyyy-MM-dd HH:mm:ss",
@@ -322,6 +324,7 @@ struct AppSettings: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion
         case hotkey
+        case aiCaptureHotkey
         case insertionPosition
         case timestampMode
         case customDateFormat
@@ -345,6 +348,7 @@ struct AppSettings: Codable, Equatable {
     init(
         schemaVersion: Int,
         hotkey: HotkeyDefinition,
+        aiCaptureHotkey: HotkeyDefinition,
         insertionPosition: InsertionPosition,
         timestampMode: TimestampMode,
         customDateFormat: String,
@@ -366,6 +370,7 @@ struct AppSettings: Codable, Equatable {
     ) {
         self.schemaVersion = schemaVersion
         self.hotkey = hotkey
+        self.aiCaptureHotkey = aiCaptureHotkey
         self.insertionPosition = insertionPosition
         self.timestampMode = timestampMode
         self.customDateFormat = customDateFormat
@@ -390,6 +395,7 @@ struct AppSettings: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         hotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .hotkey) ?? .default
+        aiCaptureHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .aiCaptureHotkey) ?? .clipDefault
         insertionPosition = try c.decodeIfPresent(InsertionPosition.self, forKey: .insertionPosition) ?? .bottom
         timestampMode = try c.decodeIfPresent(TimestampMode.self, forKey: .timestampMode) ?? .dateTime
         customDateFormat = try c.decodeIfPresent(String.self, forKey: .customDateFormat) ?? "yyyy-MM-dd HH:mm:ss"
