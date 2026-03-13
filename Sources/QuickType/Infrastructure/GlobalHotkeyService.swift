@@ -97,6 +97,10 @@ final class GlobalHotkeyService: HotkeyServiceProtocol {
     }
 
     private func registerHotKey(_ hotkey: HotkeyDefinition, id: UInt32, ref: inout EventHotKeyRef?) {
+        guard hotkey.isEnabled else {
+            ref = nil
+            return
+        }
         let hotKeyID = EventHotKeyID(signature: OSType(0x51545950), id: id)
         RegisterEventHotKey(
             hotkey.keyCode,

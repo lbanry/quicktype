@@ -9,6 +9,11 @@ private enum PendingAIResponseTarget: Equatable {
     case link(UUID)
 }
 
+private struct ExtractedLink: Equatable {
+    var kind: SavedLinkKind
+    var value: String
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var noteTargets: [NoteTarget] = []
@@ -93,6 +98,8 @@ final class AppModel: ObservableObject {
             quickActions = try quickActionRepository.loadQuickActions()
             prompts = try promptRepository.loadPrompts()
             savedLinks = try linkRepository.loadLinks()
+            normalizeLinkFolders()
+            normalizeSavedLinks()
             selectedNoteID = noteTargets.first?.id
             captureDashboardTab = .paste
             ensureDefaultPromptExists()
@@ -116,7 +123,7 @@ final class AppModel: ObservableObject {
                 }
             }
             startTrackingActiveApplications()
-            startClipboardMonitoring()
+            configureClipboardMonitoring()
         } catch {
             Logger.error("Failed bootstrap: \(error.localizedDescription)")
             lastStatusMessage = "Failed to load state: \(error.localizedDescription)"
@@ -307,9 +314,11 @@ final class AppModel: ObservableObject {
         var updated = settings
         update(&updated)
         settings = updated
+        normalizeLinkFolders()
         persist()
         hotkeyService.update(hotkey: settings.hotkey)
         hotkeyService.update(clipHotkey: settings.aiCaptureHotkey)
+        configureClipboardMonitoring()
         if settings.launchAtLogin {
             LaunchAtLoginService.setEnabled(true)
         } else {
@@ -638,17 +647,89 @@ final class AppModel: ObservableObject {
         savedLinks[index].title = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? savedLinks[index].title
             : title.trimmingCharacters(in: .whitespacesAndNewlines)
-        savedLinks[index].folderPath = normalizedFolderPath(folderPath)
+        let normalizedFolder = resolvedFolderPath(folderPath, fallback: savedLinks[index].isPinned ? firstSavedLinksFolder : AppSettings.recentLinksFolderName)
+        savedLinks[index].folderPath = normalizedFolder
+        savedLinks[index].isPinned = normalizedFolder != AppSettings.recentLinksFolderName
         savedLinks[index].notes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
         savedLinks[index].updatedAt = Date()
+        ensureLinkFolderExists(normalizedFolder)
+        savedLinks = reindexedLinks(savedLinks)
         persist()
         lastStatusMessage = "Updated link."
     }
 
+    func saveSavedLink(_ linkID: UUID, toFolder folderPath: String) {
+        guard let index = savedLinks.firstIndex(where: { $0.id == linkID }) else { return }
+        let destinationFolder = resolvedFolderPath(folderPath, fallback: firstSavedLinksFolder)
+        savedLinks[index].folderPath = destinationFolder
+        savedLinks[index].isPinned = true
+        savedLinks[index].updatedAt = Date()
+        ensureLinkFolderExists(destinationFolder)
+        savedLinks = reindexedLinks(savedLinks)
+        persist()
+        lastStatusMessage = "Saved link to \(destinationFolder)."
+    }
+
+    func unpinSavedLink(_ linkID: UUID) {
+        guard let index = savedLinks.firstIndex(where: { $0.id == linkID }) else { return }
+        savedLinks[index].folderPath = AppSettings.recentLinksFolderName
+        savedLinks[index].isPinned = false
+        savedLinks[index].updatedAt = Date()
+        savedLinks = reindexedLinks(savedLinks)
+        persist()
+        lastStatusMessage = "Moved link to Recent."
+    }
+
+    func clearRecentLinks() {
+        let removableIDs = Set(
+            savedLinks
+                .filter { $0.folderPath == AppSettings.recentLinksFolderName && !$0.isPinned }
+                .map(\.id)
+        )
+        guard !removableIDs.isEmpty else { return }
+        savedLinks.removeAll { removableIDs.contains($0.id) }
+        pendingAIResponseTargets.removeAll { target in
+            guard case .link(let linkID) = target else { return false }
+            return removableIDs.contains(linkID)
+        }
+        savedLinks = reindexedLinks(savedLinks)
+        persist()
+        lastStatusMessage = "Cleared Recent links."
+    }
+
+    func moveSavedLink(_ linkID: UUID, toFolder folderPath: String, before targetLinkID: UUID? = nil) {
+        guard let sourceIndex = savedLinks.firstIndex(where: { $0.id == linkID }) else { return }
+        let destinationFolder = resolvedFolderPath(folderPath, fallback: AppSettings.recentLinksFolderName)
+        ensureLinkFolderExists(destinationFolder)
+
+        var movedLink = savedLinks.remove(at: sourceIndex)
+        movedLink.folderPath = destinationFolder
+        movedLink.isPinned = destinationFolder != AppSettings.recentLinksFolderName
+        movedLink.updatedAt = Date()
+
+        let insertIndex: Int
+        if let targetLinkID,
+           let targetIndex = savedLinks.firstIndex(where: { $0.id == targetLinkID && $0.folderPath == destinationFolder }) {
+            insertIndex = targetIndex
+        } else {
+            insertIndex = savedLinks.lastIndex(where: { $0.folderPath == destinationFolder }).map { $0 + 1 } ?? savedLinks.endIndex
+        }
+
+        savedLinks.insert(movedLink, at: insertIndex)
+        savedLinks = reindexedLinks(savedLinks)
+        persist()
+        lastStatusMessage = movedLink.isPinned ? "Moved link to \(destinationFolder)." : "Moved link to Recent."
+    }
+
     func openSavedLink(_ linkID: UUID) {
-        guard let link = savedLinks.first(where: { $0.id == linkID }),
-              let url = URL(string: link.url) else { return }
-        NSWorkspace.shared.open(url)
+        guard let link = savedLinks.first(where: { $0.id == linkID }) else { return }
+        switch link.kind {
+        case .web:
+            guard let url = URL(string: link.url) else { return }
+            NSWorkspace.shared.open(url)
+        case .file:
+            NSWorkspace.shared.open(URL(fileURLWithPath: link.url))
+        }
     }
 
     func copySavedLink(_ linkID: UUID) {
@@ -668,6 +749,10 @@ final class AppModel: ObservableObject {
     }
 
     func summarizeSavedLinkWithAI(_ linkID: UUID) {
+        guard settings.aiFeaturesEnabled else {
+            lastStatusMessage = "AI features are turned off in Settings."
+            return
+        }
         guard !settings.aiAppPath.isEmpty else {
             lastStatusMessage = "Choose an AI app in Settings first."
             return
@@ -1021,6 +1106,7 @@ final class AppModel: ObservableObject {
     }
 
     private func pollClipboard() {
+        guard settings.clipboardMonitoringEnabled else { return }
         let pasteboard = NSPasteboard.general
         guard pasteboard.changeCount != lastPasteboardChangeCount else { return }
         lastPasteboardChangeCount = pasteboard.changeCount
@@ -1044,7 +1130,9 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let extractedLinks = extractCopiedLinks(from: text)
+        let extractedLinks = settings.automaticLinkCaptureEnabled
+            ? extractCopiedLinks(from: text)
+            : (urls: [], remainingText: text.trimmingCharacters(in: .whitespacesAndNewlines))
         if handleCopiedLinksIfNeeded(extractedLinks.urls) {
             if extractedLinks.remainingText.isEmpty {
                 return
@@ -1117,34 +1205,44 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func handleCopiedLinksIfNeeded(_ urls: [URL]) -> Bool {
-        guard !urls.isEmpty else {
+    private func handleCopiedLinksIfNeeded(_ links: [ExtractedLink]) -> Bool {
+        guard !links.isEmpty else {
             return false
         }
 
         var addedCount = 0
         var matchedBrowserMetadata = currentBrowserMetadata()
 
-        for url in urls {
-            if let index = savedLinks.firstIndex(where: { $0.url == url.absoluteString }) {
+        for extracted in links {
+            if let index = savedLinks.firstIndex(where: { $0.url == extracted.value && $0.kind == extracted.kind }) {
+                if savedLinks[index].folderPath == AppSettings.recentLinksFolderName {
+                    savedLinks[index].updatedAt = Date()
+                }
                 savedLinks[index].updatedAt = Date()
                 continue
             }
 
             let now = Date()
             let title: String
-            if matchedBrowserMetadata.url == url.absoluteString, let browserTitle = matchedBrowserMetadata.title {
+            if extracted.kind == .web,
+               matchedBrowserMetadata.url == extracted.value,
+               let browserTitle = matchedBrowserMetadata.title {
                 title = browserTitle
             } else {
-                title = defaultLinkTitle(for: url)
-                fetchPageTitle(for: url)
+                title = defaultLinkTitle(for: extracted)
+                if extracted.kind == .web, let url = URL(string: extracted.value) {
+                    fetchPageTitle(for: url)
+                }
             }
 
             let link = SavedLink(
                 id: UUID(),
                 title: title,
-                url: url.absoluteString,
-                folderPath: "",
+                url: extracted.value,
+                kind: extracted.kind,
+                folderPath: AppSettings.recentLinksFolderName,
+                position: nextLinkPosition(in: AppSettings.recentLinksFolderName),
+                isPinned: false,
                 summary: nil,
                 notes: nil,
                 createdAt: now,
@@ -1157,18 +1255,19 @@ final class AppModel: ObservableObject {
             savedLinks.insert(link, at: 0)
             addedCount += 1
 
-            if matchedBrowserMetadata.url == url.absoluteString {
+            if matchedBrowserMetadata.url == extracted.value {
                 matchedBrowserMetadata = (nil, nil)
             }
         }
 
         guard addedCount > 0 else {
-            lastStatusMessage = urls.count == 1 ? "Link already saved." : "Links already saved."
+            lastStatusMessage = links.count == 1 ? "Link already saved." : "Links already saved."
             persist()
             return true
         }
 
         captureDashboardTab = .links
+        savedLinks = reindexedLinks(savedLinks)
         persist()
         lastStatusMessage = addedCount == 1 ? "Saved link." : "Saved \(addedCount) links."
         return true
@@ -1192,21 +1291,25 @@ final class AppModel: ObservableObject {
         recentClipboardItems.first(where: { $0.id == itemID })
     }
 
-    private func extractCopiedLinks(from text: String) -> (urls: [URL], remainingText: String) {
+    private func extractCopiedLinks(from text: String) -> (urls: [ExtractedLink], remainingText: String) {
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
-        var normalizedMatches: [(URL, Range<String.Index>)] = []
+        var normalizedMatches: [(ExtractedLink, Range<String.Index>)] = []
 
         if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
             let matches = detector.matches(in: text, options: [], range: nsRange)
-            normalizedMatches.append(contentsOf: matches.compactMap { match -> (URL, Range<String.Index>)? in
+            normalizedMatches.append(contentsOf: matches.compactMap { match -> (ExtractedLink, Range<String.Index>)? in
                 guard let url = match.url,
                       let normalizedURL = normalizedHTTPURL(from: url.absoluteString),
                       let range = Range(match.range, in: text) else {
                     return nil
                 }
-                return (normalizedURL, range)
+                return (ExtractedLink(kind: .web, value: normalizedURL.absoluteString), range)
             })
         }
+
+        normalizedMatches.append(contentsOf: localPathMatches(in: text, nsRange: nsRange).filter { candidate in
+            !normalizedMatches.contains(where: { $0.1.overlaps(candidate.1) })
+        })
 
         if let domainRegex = try? NSRegularExpression(
             pattern: #"(?i)\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>()\[\]{}]*)?"#,
@@ -1227,7 +1330,7 @@ final class AppModel: ObservableObject {
                     continue
                 }
 
-                normalizedMatches.append((normalizedURL, range))
+                normalizedMatches.append((ExtractedLink(kind: .web, value: normalizedURL.absoluteString), range))
             }
         }
 
@@ -1246,20 +1349,22 @@ final class AppModel: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         var seen = Set<String>()
-        let urls = normalizedMatches.compactMap { match -> URL? in
-            let url = match.0
-            let absoluteString = url.absoluteString
-            guard seen.insert(absoluteString).inserted else {
+        let urls = normalizedMatches.compactMap { match -> ExtractedLink? in
+            let link = match.0
+            let key = "\(link.kind.rawValue):\(link.value)"
+            guard seen.insert(key).inserted else {
                 return nil
             }
-            return url
+            return link
         }
 
         return (urls, remainingText)
     }
 
     private func normalizedHTTPURL(from value: String) -> URL? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?)]}'\""))
         guard let url = URL(string: trimmed),
               let scheme = url.scheme?.lowercased(),
               ["http", "https"].contains(scheme),
@@ -1269,12 +1374,20 @@ final class AppModel: ObservableObject {
         return url
     }
 
-    private func defaultLinkTitle(for url: URL) -> String {
-        if let host = url.host, !host.isEmpty {
-            let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            return path.isEmpty ? host : "\(host)/\(path)"
+    private func defaultLinkTitle(for link: ExtractedLink) -> String {
+        switch link.kind {
+        case .web:
+            guard let url = URL(string: link.value) else { return link.value }
+            if let host = url.host, !host.isEmpty {
+                let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                return path.isEmpty ? host : "\(host)/\(path)"
+            }
+            return link.value
+        case .file:
+            let fileURL = URL(fileURLWithPath: link.value)
+            let name = fileURL.lastPathComponent
+            return name.isEmpty ? link.value : name
         }
-        return url.absoluteString
     }
 
     private func normalizedFolderPath(_ value: String) -> String {
@@ -1285,11 +1398,92 @@ final class AppModel: ObservableObject {
             .joined(separator: "/")
     }
 
+    func orderedLinks(in folderPath: String) -> [SavedLink] {
+        savedLinks
+            .filter { $0.folderPath == folderPath }
+            .sorted {
+                if $0.position == $1.position {
+                    return $0.updatedAt > $1.updatedAt
+                }
+                return $0.position < $1.position
+            }
+    }
+
+    var linkFolders: [String] {
+        var folders = settings.linkFolders.map { resolvedFolderPath($0, fallback: AppSettings.recentLinksFolderName) }
+        if !folders.contains(AppSettings.recentLinksFolderName) {
+            folders.insert(AppSettings.recentLinksFolderName, at: 0)
+        }
+        for folder in savedLinks.map(\.folderPath) where !folders.contains(folder) {
+            folders.append(folder)
+        }
+        return folders
+    }
+
+    var firstSavedLinksFolder: String {
+        linkFolders.first(where: { $0 != AppSettings.recentLinksFolderName }) ?? "Saved"
+    }
+
+    func createLinkFolder(named rawName: String) {
+        let folder = resolvedFolderPath(rawName, fallback: "")
+        guard !folder.isEmpty else { return }
+        ensureLinkFolderExists(folder)
+        persist()
+        lastStatusMessage = "Added folder."
+    }
+
     private func linkPromptContent(_ link: SavedLink) -> String {
         """
         Title: \(link.title)
-        URL: \(link.url)
+        Kind: \(link.kind.rawValue)
+        Location: \(link.url)
         """
+    }
+
+    private func localPathMatches(in text: String, nsRange: NSRange) -> [(ExtractedLink, Range<String.Index>)] {
+        guard let pathRegex = try? NSRegularExpression(
+            pattern: #"(?:(?<=^)|(?<=\s))(~(?:/[^\s]+)+|/(?:[^\s]+/?)+|(?:\./|\../)[^\s]+|[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)(?=$|\s)"#,
+            options: []
+        ) else {
+            return []
+        }
+
+        let matches = pathRegex.matches(in: text, options: [], range: nsRange)
+        return matches.compactMap { match in
+            guard let range = Range(match.range(at: 1), in: text) else {
+                return nil
+            }
+            let candidate = String(text[range])
+            guard let path = normalizedLocalPath(from: candidate) else {
+                return nil
+            }
+            return (ExtractedLink(kind: .file, value: path), range)
+        }
+    }
+
+    private func normalizedLocalPath(from value: String) -> String? {
+        let trimmed = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?)]}'\""))
+        guard !trimmed.isEmpty else { return nil }
+
+        let expanded: String
+        if trimmed.hasPrefix("~/") {
+            expanded = NSString(string: trimmed).expandingTildeInPath
+        } else if trimmed.hasPrefix("./") || trimmed.hasPrefix("../") {
+            expanded = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent(trimmed)
+                .standardizedFileURL.path
+        } else {
+            expanded = trimmed
+        }
+
+        guard expanded.hasPrefix("/") else { return nil }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory) else {
+            return nil
+        }
+        return URL(fileURLWithPath: expanded).standardizedFileURL.path
     }
 
     private func currentBrowserMetadata() -> (title: String?, url: String?) {
@@ -1361,12 +1555,12 @@ final class AppModel: ObservableObject {
     }
 
     private func applyFetchedPageTitle(_ title: String, for urlString: String) {
-        guard let index = savedLinks.firstIndex(where: { $0.url == urlString }) else {
+        guard let index = savedLinks.firstIndex(where: { $0.url == urlString && $0.kind == .web }) else {
             return
         }
 
         let existingTitle = savedLinks[index].title
-        if existingTitle != defaultLinkTitle(for: URL(string: urlString) ?? URL(fileURLWithPath: "/")) {
+        if existingTitle != defaultLinkTitle(for: ExtractedLink(kind: .web, value: urlString)) {
             return
         }
 
@@ -1836,6 +2030,80 @@ final class AppModel: ObservableObject {
             }
             self?.returnToAppAfterClipboardSelectionPID = nil
         }
+    }
+
+    private func configureClipboardMonitoring() {
+        if settings.clipboardMonitoringEnabled {
+            startClipboardMonitoring()
+        } else {
+            clipboardTimer?.invalidate()
+            clipboardTimer = nil
+        }
+    }
+
+    private func normalizeLinkFolders() {
+        let normalized = settings.linkFolders
+            .map { normalizedFolderPath($0) }
+            .filter { !$0.isEmpty }
+        var uniqueFolders: [String] = [AppSettings.recentLinksFolderName]
+        for folder in normalized where folder != AppSettings.recentLinksFolderName && !uniqueFolders.contains(folder) {
+            uniqueFolders.append(folder)
+        }
+        settings.linkFolders = uniqueFolders
+    }
+
+    private func ensureLinkFolderExists(_ folder: String) {
+        let normalized = resolvedFolderPath(folder, fallback: AppSettings.recentLinksFolderName)
+        if !settings.linkFolders.contains(normalized) {
+            settings.linkFolders.append(normalized)
+        }
+    }
+
+    private func resolvedFolderPath(_ value: String, fallback: String) -> String {
+        let normalized = normalizedFolderPath(value)
+        return normalized.isEmpty ? fallback : normalized
+    }
+
+    private func normalizeSavedLinks() {
+        ensureLinkFolderExists(AppSettings.recentLinksFolderName)
+        for index in savedLinks.indices {
+            let folder = resolvedFolderPath(
+                savedLinks[index].folderPath,
+                fallback: savedLinks[index].isPinned ? firstSavedLinksFolder : AppSettings.recentLinksFolderName
+            )
+            savedLinks[index].folderPath = folder
+            savedLinks[index].isPinned = folder != AppSettings.recentLinksFolderName
+            ensureLinkFolderExists(folder)
+        }
+        savedLinks = reindexedLinks(savedLinks)
+    }
+
+    private func reindexedLinks(_ links: [SavedLink]) -> [SavedLink] {
+        var result: [SavedLink] = []
+        for folder in linkFolders {
+            let folderLinks = links
+                .filter { $0.folderPath == folder }
+                .sorted {
+                    if $0.position == $1.position {
+                        return $0.updatedAt > $1.updatedAt
+                    }
+                    return $0.position < $1.position
+                }
+            for (index, var link) in folderLinks.enumerated() {
+                link.position = index
+                result.append(link)
+            }
+        }
+        for var link in links where !result.contains(where: { $0.id == link.id }) {
+            link.position = nextLinkPosition(in: link.folderPath, existingLinks: result)
+            result.append(link)
+        }
+        return result
+    }
+
+    private func nextLinkPosition(in folder: String, existingLinks: [SavedLink]? = nil) -> Int {
+        let source = existingLinks ?? savedLinks
+        return (source.filter { $0.folderPath == folder }.map(\.position).max() ?? -1) + 1
     }
 
     private func pasteIntoFocusedApplication() {

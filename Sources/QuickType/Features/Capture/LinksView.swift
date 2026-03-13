@@ -1,13 +1,17 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LinksView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var selectedFolderPath = ""
+    @State private var selectedFolderPath = AppSettings.recentLinksFolderName
     @State private var editingLink: SavedLink?
+    @State private var savingLink: SavedLink?
     @State private var newFolderName = ""
     @State private var selectedLinkID: UUID?
     @State private var focusedArea: LinksFocusArea = .links
     @State private var keyMonitor: Any?
+    @State private var draggedLinkID: UUID?
 
     var body: some View {
         HStack(spacing: 16) {
@@ -15,12 +19,11 @@ struct LinksView: View {
                 HStack {
                     Text("Folders")
                         .font(.title3.bold())
-                        .help("Use Tab to switch between folders and links. Use Up/Down to move.")
                     Spacer()
                 }
 
-                List(folderPaths, id: \.self, selection: $selectedFolderPath) { path in
-                    Text(path.isEmpty ? "All Links" : path)
+                List(model.linkFolders, id: \.self, selection: $selectedFolderPath) { path in
+                    folderRow(path)
                         .tag(path)
                 }
                 .scrollContentBackground(.hidden)
@@ -30,9 +33,11 @@ struct LinksView: View {
                     TextField("New folder", text: $newFolderName)
                         .textFieldStyle(.roundedBorder)
                     Button("Add") {
-                        let folder = normalizedFolder(newFolderName)
-                        guard !folder.isEmpty else { return }
-                        selectedFolderPath = folder
+                        model.createLinkFolder(named: newFolderName)
+                        let resolvedFolder = normalizedFolder(newFolderName)
+                        if !resolvedFolder.isEmpty {
+                            selectedFolderPath = resolvedFolder
+                        }
                         newFolderName = ""
                     }
                     .glassControl()
@@ -42,10 +47,15 @@ struct LinksView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text(selectedFolderPath.isEmpty ? "All Links" : selectedFolderPath)
+                    Text(selectedFolderPath)
                         .font(.title3.bold())
-                        .help("Use Up/Down to move, Space to open, Return to edit, Cmd+C to copy, Cmd+Delete to delete.")
                     Spacer()
+                    if selectedFolderPath == AppSettings.recentLinksFolderName && !filteredLinks.isEmpty {
+                        Button("Clear Recent") {
+                            model.clearRecentLinks()
+                        }
+                        .glassControl()
+                    }
                     Text("\(filteredLinks.count)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -55,12 +65,15 @@ struct LinksView: View {
                 }
 
                 if filteredLinks.isEmpty {
-                    Text("Copied web links are saved here automatically.")
+                    Text(selectedFolderPath == AppSettings.recentLinksFolderName
+                        ? "Copied links land in Recent first. Save them into folders when you want to keep them."
+                        : "Drop a link here or save one into this folder.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .glassCard()
+                        .onDrop(of: [UTType.text.identifier], delegate: FolderRowDropDelegate(folderPath: selectedFolderPath, model: model, draggedLinkID: $draggedLinkID))
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
@@ -69,10 +82,23 @@ struct LinksView: View {
                                     link: link,
                                     isSelected: selectedLinkID == link.id,
                                     onOpen: { model.openSavedLink(link.id) },
+                                    onCopy: { model.copySavedLink(link.id) },
+                                    onSave: {
+                                        if link.isPinned {
+                                            model.unpinSavedLink(link.id)
+                                        } else {
+                                            savingLink = link
+                                        }
+                                    },
                                     onSummarize: { model.summarizeSavedLinkWithAI(link.id) },
                                     onEdit: { editingLink = link },
                                     onDelete: { model.deleteSavedLink(link.id) }
                                 )
+                                .onDrag {
+                                    draggedLinkID = link.id
+                                    return NSItemProvider(object: link.id.uuidString as NSString)
+                                }
+                                .onDrop(of: [UTType.text.identifier], delegate: LinkCardDropDelegate(targetLink: link, model: model, draggedLinkID: $draggedLinkID))
                             }
                         }
                     }
@@ -85,9 +111,13 @@ struct LinksView: View {
             LinkEditor(link: link)
                 .environmentObject(model)
         }
+        .sheet(item: $savingLink) { link in
+            LinkSaveSheet(link: link, suggestedFolder: link.folderPath == AppSettings.recentLinksFolderName ? model.firstSavedLinksFolder : link.folderPath)
+                .environmentObject(model)
+        }
         .onAppear {
-            if selectedFolderPath.isEmpty, !folderPaths.contains("") {
-                selectedFolderPath = folderPaths.first ?? ""
+            if !model.linkFolders.contains(selectedFolderPath) {
+                selectedFolderPath = model.linkFolders.first ?? AppSettings.recentLinksFolderName
             }
             syncSelection()
             installKeyboardMonitor()
@@ -99,20 +129,30 @@ struct LinksView: View {
             syncSelection()
         }
         .onChange(of: model.savedLinks) { _ in
+            if !model.linkFolders.contains(selectedFolderPath) {
+                selectedFolderPath = model.linkFolders.first ?? AppSettings.recentLinksFolderName
+            }
             syncSelection()
         }
     }
 
-    private var folderPaths: [String] {
-        let paths = Set(model.savedLinks.map(\.folderPath))
-        return [""] + paths.filter { !$0.isEmpty }.sorted()
+    private func folderRow(_ path: String) -> some View {
+        HStack {
+            Text(path)
+            Spacer()
+            Text("\(model.orderedLinks(in: path).count)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedFolderPath = path
+        }
+        .onDrop(of: [UTType.text.identifier], delegate: FolderRowDropDelegate(folderPath: path, model: model, draggedLinkID: $draggedLinkID))
     }
 
     private var filteredLinks: [SavedLink] {
-        if selectedFolderPath.isEmpty {
-            return model.savedLinks
-        }
-        return model.savedLinks.filter { $0.folderPath == selectedFolderPath }
+        model.orderedLinks(in: selectedFolderPath)
     }
 
     private func normalizedFolder(_ value: String) -> String {
@@ -137,44 +177,45 @@ struct LinksView: View {
     private func installKeyboardMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard editingLink == nil else { return event }
+            guard editingLink == nil, savingLink == nil else { return event }
             guard !model.isHeaderKeyboardFocusActive else { return event }
 
-            if event.modifierFlags.contains(.command),
-               Int(event.keyCode) == 51 {
+            if model.settings.deleteSelectionHotkey.matches(event) {
                 deleteSelectedLink()
                 return nil
             }
 
-            if event.modifierFlags.contains(.command),
-               event.charactersIgnoringModifiers?.lowercased() == "c" {
+            if model.settings.copySelectionHotkey.matches(event) {
                 copySelectedLink()
                 return nil
             }
 
-            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
-                return event
-            }
-
-            switch Int(event.keyCode) {
-            case 48:
+            if model.settings.switchPaneHotkey.matches(event) {
                 focusedArea = focusedArea == .folders ? .links : .folders
                 return nil
-            case 49:
+            }
+
+            if model.settings.activateSelectionHotkey.matches(event) {
                 confirmSelection()
                 return nil
-            case 36, 76:
+            }
+
+            if model.settings.editSelectionHotkey.matches(event) {
                 openOrEditSelection()
                 return nil
-            case 125:
+            }
+
+            if model.settings.nextNavigationHotkey.matches(event) {
                 moveSelection(delta: 1)
                 return nil
-            case 126:
+            }
+
+            if model.settings.previousNavigationHotkey.matches(event) {
                 moveSelection(delta: -1)
                 return nil
-            default:
-                return event
             }
+
+            return event
         }
     }
 
@@ -188,7 +229,7 @@ struct LinksView: View {
     private func moveSelection(delta: Int) {
         switch focusedArea {
         case .folders:
-            let folders = folderPaths
+            let folders = model.linkFolders
             guard !folders.isEmpty else { return }
             let currentIndex = folders.firstIndex(of: selectedFolderPath) ?? 0
             let nextIndex = min(max(currentIndex + delta, 0), folders.count - 1)
@@ -244,6 +285,8 @@ private struct LinkCard: View {
     let link: SavedLink
     let isSelected: Bool
     let onOpen: () -> Void
+    let onCopy: () -> Void
+    let onSave: () -> Void
     let onSummarize: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -256,6 +299,10 @@ private struct LinkCard: View {
                         Text(link.title)
                             .font(.headline)
                             .lineLimit(1)
+                        badge(link.kind == .web ? "Web" : "Local")
+                        if link.isPinned {
+                            badge("Saved")
+                        }
                         if link.awaitingAIResponse {
                             badge("Waiting")
                         } else if link.summary != nil {
@@ -266,14 +313,14 @@ private struct LinkCard: View {
                         .font(.footnote.monospaced())
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    if !link.folderPath.isEmpty {
-                        Text(link.folderPath)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(link.folderPath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 actionButton(systemName: "arrow.up.right.square", helpText: "Open link", action: onOpen)
+                actionButton(systemName: "doc.on.doc", helpText: "Copy link", action: onCopy)
+                actionButton(systemName: link.isPinned ? "pin.slash" : "pin", helpText: link.isPinned ? "Move back to Recent" : "Save to folder", action: onSave)
                 actionButton(systemName: "sparkles", helpText: "Summarize link", action: onSummarize)
                 actionButton(systemName: "pencil", helpText: "Edit link", action: onEdit)
                 actionButton(systemName: "trash", helpText: "Delete link", role: .destructive, action: onDelete)
@@ -298,7 +345,6 @@ private struct LinkCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
         )
-        .help("Link: Space open, Return edit, Cmd+C copy URL, Cmd+Delete delete")
     }
 
     private func badge(_ text: String) -> some View {
@@ -371,11 +417,112 @@ private struct LinkEditor: View {
                     model.updateSavedLink(link.id, title: title, folderPath: folderPath, notes: notes)
                     dismiss()
                 }
-                .keyboardShortcut(.return, modifiers: .command)
             }
         }
         .padding()
         .frame(minWidth: 560, minHeight: 360)
         .glassBackground()
+    }
+}
+
+private struct LinkSaveSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var model: AppModel
+    @State private var selectedFolder: String
+    @State private var newFolderName = ""
+    let link: SavedLink
+    let suggestedFolder: String
+
+    init(link: SavedLink, suggestedFolder: String) {
+        self.link = link
+        self.suggestedFolder = suggestedFolder
+        _selectedFolder = State(initialValue: suggestedFolder)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Save Link")
+                .font(.title3.bold())
+
+            Text(link.url)
+                .font(.footnote.monospaced())
+                .foregroundStyle(.secondary)
+
+            Picker("Folder", selection: $selectedFolder) {
+                ForEach(model.linkFolders.filter { $0 != AppSettings.recentLinksFolderName }, id: \.self) { folder in
+                    Text(folder).tag(folder)
+                }
+                if !newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(normalizedFolder(newFolderName)).tag(normalizedFolder(newFolderName))
+                }
+            }
+
+            HStack {
+                TextField("New folder", text: $newFolderName)
+                    .textFieldStyle(.roundedBorder)
+                Button("Use") {
+                    let folder = normalizedFolder(newFolderName)
+                    guard !folder.isEmpty else { return }
+                    selectedFolder = folder
+                }
+                .glassControl()
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save") {
+                    let folder = normalizedFolder(selectedFolder.isEmpty ? newFolderName : selectedFolder)
+                    model.saveSavedLink(link.id, toFolder: folder)
+                    dismiss()
+                }
+                .disabled(normalizedFolder(selectedFolder.isEmpty ? newFolderName : selectedFolder).isEmpty)
+            }
+        }
+        .padding()
+        .frame(minWidth: 420)
+        .glassBackground()
+    }
+
+    private func normalizedFolder(_ value: String) -> String {
+        value
+            .split(separator: "/")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "/")
+    }
+}
+
+private struct FolderRowDropDelegate: DropDelegate {
+    let folderPath: String
+    let model: AppModel
+    @Binding var draggedLinkID: UUID?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedLinkID != nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let draggedLinkID else { return false }
+        model.moveSavedLink(draggedLinkID, toFolder: folderPath)
+        self.draggedLinkID = nil
+        return true
+    }
+}
+
+private struct LinkCardDropDelegate: DropDelegate {
+    let targetLink: SavedLink
+    let model: AppModel
+    @Binding var draggedLinkID: UUID?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedLinkID != nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let draggedLinkID, draggedLinkID != targetLink.id else { return false }
+        model.moveSavedLink(draggedLinkID, toFolder: targetLink.folderPath, before: targetLink.id)
+        self.draggedLinkID = nil
+        return true
     }
 }

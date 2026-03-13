@@ -6,6 +6,9 @@ struct HotkeyRecorderView: NSViewRepresentable {
     @Binding var hotkey: HotkeyDefinition
 
     static func describe(_ hotkey: HotkeyDefinition) -> String {
+        if !hotkey.isEnabled {
+            return "Disabled"
+        }
         let key = keyCodeToString(hotkey.keyCode)
         let mods = modifiersDescription(hotkey.modifiers)
         return mods.isEmpty ? key : "\(mods)+\(key)"
@@ -23,11 +26,11 @@ struct HotkeyRecorderView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSButton, context: Context) {
-        nsView.title = context.coordinator.isRecording ? "Press keys..." : keyDescription(for: hotkey)
+        nsView.title = keyDescription(for: hotkey, isRecording: context.coordinator.isRecording)
     }
 
-    private func keyDescription(for hotkey: HotkeyDefinition) -> String {
-        Self.describe(hotkey)
+    private func keyDescription(for hotkey: HotkeyDefinition, isRecording: Bool = false) -> String {
+        isRecording ? "Press keys..." : Self.describe(hotkey)
     }
 
     private static func modifiersDescription(_ flags: UInt32) -> String {
@@ -97,13 +100,23 @@ struct HotkeyRecorderView: NSViewRepresentable {
             isRecording = true
             button?.title = "Press keys..."
 
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
                 guard let self else { return event }
-                let flags = event.modifierFlags
-                let carbonFlags = self.carbonFlags(from: flags)
-                guard carbonFlags != 0 else {
+
+                if event.keyCode == UInt16(kVK_Escape) {
+                    self.hotkey = .disabled
                     self.stopRecording()
                     return nil
+                }
+
+                guard event.type == .keyDown else {
+                    return nil
+                }
+
+                let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+                let carbonFlags = self.carbonFlags(from: flags)
+                guard carbonFlags != 0 else {
+                    return event
                 }
                 self.hotkey = HotkeyDefinition(keyCode: UInt32(event.keyCode), modifiers: carbonFlags)
                 self.stopRecording()
@@ -117,7 +130,7 @@ struct HotkeyRecorderView: NSViewRepresentable {
             }
             self.monitor = nil
             self.isRecording = false
-            button?.title = "Updated"
+            button?.title = HotkeyRecorderView.describe(hotkey)
         }
 
         private func carbonFlags(from flags: NSEvent.ModifierFlags) -> UInt32 {

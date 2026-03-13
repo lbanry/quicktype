@@ -43,8 +43,8 @@ final class JSONSettingsStore: SettingsStoreProtocol {
         if migrated.aiPromptTemplate.isEmpty {
             migrated.aiPromptTemplate = AppSettings.default.aiPromptTemplate
         }
-        if migrated.aiCaptureHotkey == HotkeyDefinition(keyCode: 0, modifiers: 0) {
-            migrated.aiCaptureHotkey = AppSettings.default.aiCaptureHotkey
+        if migrated.linkFolders.isEmpty {
+            migrated.linkFolders = AppSettings.default.linkFolders
         }
         return migrated
     }

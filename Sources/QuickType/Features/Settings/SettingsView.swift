@@ -8,6 +8,8 @@ struct SettingsView: View {
         TabView {
             generalTab
                 .tabItem { Text("General") }
+            featuresTab
+                .tabItem { Text("Features") }
             PromptLibraryView()
                 .environmentObject(model)
                 .tabItem { Text("Prompts") }
@@ -17,7 +19,7 @@ struct SettingsView: View {
                 .environmentObject(model)
                 .tabItem { Text("Notes") }
         }
-        .frame(minWidth: 620, minHeight: 420)
+        .frame(minWidth: 700, minHeight: 520)
         .padding()
         .glassBackground()
     }
@@ -84,39 +86,6 @@ struct SettingsView: View {
                 set: { newValue in model.updateSettings { $0.launchAtLogin = newValue } }
             ))
 
-            HStack {
-                Text("Global Hotkey")
-                Spacer()
-                HotkeyRecorderView(hotkey: Binding(
-                    get: { model.settings.hotkey },
-                    set: { newValue in
-                        // Require at least one modifier to avoid hijacking normal typing.
-                        let hasModifier =
-                            (newValue.modifiers & UInt32(cmdKey)) != 0 ||
-                            (newValue.modifiers & UInt32(optionKey)) != 0 ||
-                            (newValue.modifiers & UInt32(controlKey)) != 0
-                        guard hasModifier else { return }
-                        model.updateSettings { $0.hotkey = newValue }
-                    }
-                ))
-            }
-
-            HStack {
-                Text("AI Capture Hotkey")
-                Spacer()
-                HotkeyRecorderView(hotkey: Binding(
-                    get: { model.settings.aiCaptureHotkey },
-                    set: { newValue in
-                        let hasModifier =
-                            (newValue.modifiers & UInt32(cmdKey)) != 0 ||
-                            (newValue.modifiers & UInt32(optionKey)) != 0 ||
-                            (newValue.modifiers & UInt32(controlKey)) != 0
-                        guard hasModifier else { return }
-                        model.updateSettings { $0.aiCaptureHotkey = newValue }
-                    }
-                ))
-            }
-
             Divider()
             Text("AI Automation")
                 .font(.headline)
@@ -145,7 +114,7 @@ struct SettingsView: View {
                 set: { newValue in model.updateSettings { $0.aiAutoSubmit = newValue } }
             ))
 
-            Text("Manage reusable prompts in the Prompts tab. Press Return in the prompt picker to use the default prompt.")
+            Text("Manage reusable prompts in the Prompts tab. Shortcuts start disabled until you assign them.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -180,6 +149,69 @@ struct SettingsView: View {
         .padding(8)
         .scrollContentBackground(.hidden)
         .glassCard()
+    }
+
+    private var featuresTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Features")
+                        .font(.headline)
+
+                    featureToggleRow("Track clipboard changes", isOn: Binding(
+                        get: { model.settings.clipboardMonitoringEnabled },
+                        set: { newValue in model.updateSettings { $0.clipboardMonitoringEnabled = newValue } }
+                    ))
+
+                    featureToggleRow("Capture copied links automatically", isOn: Binding(
+                        get: { model.settings.automaticLinkCaptureEnabled },
+                        set: { newValue in model.updateSettings { $0.automaticLinkCaptureEnabled = newValue } }
+                    ))
+
+                    featureToggleRow("Enable AI features", isOn: Binding(
+                        get: { model.settings.aiFeaturesEnabled },
+                        set: { newValue in model.updateSettings { $0.aiFeaturesEnabled = newValue } }
+                    ))
+
+                    Text("New links now default into the Recent folder. Disable auto-capture if you want clipboard text without link extraction.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Divider()
+
+                    Text("Feature Shortcuts")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Captured shortcuts appear here immediately. Press Escape while recording to clear one.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    shortcutRow("Open Capture", keyPath: \.hotkey)
+                    shortcutRow("Send Selection to AI", keyPath: \.aiCaptureHotkey)
+                    shortcutRow("Open Settings", keyPath: \.openSettingsHotkey)
+                }
+                .padding(16)
+                .glassCard()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Navigation Shortcuts")
+                        .font(.headline)
+                    Text("These drive in-app navigation for links, clips, and the capture header.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    shortcutRow("Next Item", keyPath: \.nextNavigationHotkey)
+                    shortcutRow("Previous Item", keyPath: \.previousNavigationHotkey)
+                    shortcutRow("Activate / Expand", keyPath: \.activateSelectionHotkey)
+                    shortcutRow("Edit Selection", keyPath: \.editSelectionHotkey)
+                    shortcutRow("Copy Selection", keyPath: \.copySelectionHotkey)
+                    shortcutRow("Delete Selection", keyPath: \.deleteSelectionHotkey)
+                    shortcutRow("Switch Pane / Section", keyPath: \.switchPaneHotkey)
+                }
+                .padding(16)
+                .glassCard()
+            }
+            .padding(8)
+        }
     }
 
     private var reliabilityTab: some View {
@@ -237,4 +269,28 @@ struct SettingsView: View {
         .padding(8)
     }
 
+    private func shortcutRow(_ title: String, keyPath: WritableKeyPath<AppSettings, HotkeyDefinition>) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(HotkeyRecorderView.describe(model.settings[keyPath: keyPath]))
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .frame(width: 150, alignment: .leading)
+            HotkeyRecorderView(hotkey: Binding(
+                get: { model.settings[keyPath: keyPath] },
+                set: { newValue in
+                    model.updateSettings { $0[keyPath: keyPath] = newValue }
+                }
+            ))
+            Button("Clear") {
+                model.updateSettings { $0[keyPath: keyPath] = .disabled }
+            }
+            .glassControl()
+        }
+    }
+
+    private func featureToggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
+        Toggle(title, isOn: isOn)
+    }
 }

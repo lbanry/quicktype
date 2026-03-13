@@ -12,7 +12,7 @@ struct PromptPickerView: View {
             Text("Choose Prompt")
                 .font(.title3.bold())
 
-            Text("Press Return to use the default prompt, or pick a prompt below.")
+            Text("Pick a prompt below, or assign an activate shortcut in Settings if you want keyboard selection.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -65,7 +65,6 @@ struct PromptPickerView: View {
                 Button("Use Default") {
                     model.submitPendingSelectionWithDefaultPrompt()
                 }
-                .keyboardShortcut(.return, modifiers: [])
             }
         }
         .padding()
@@ -83,11 +82,11 @@ struct PromptPickerView: View {
     private func installKeyboardMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter) else {
-                return event
+            if model.settings.activateSelectionHotkey.matches(event) {
+                model.submitPendingSelectionWithDefaultPrompt()
+                return nil
             }
-            model.submitPendingSelectionWithDefaultPrompt()
-            return nil
+            return event
         }
     }
 

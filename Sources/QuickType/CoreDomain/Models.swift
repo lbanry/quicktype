@@ -81,6 +81,8 @@ struct HotkeyDefinition: Codable, Equatable, Hashable {
     var keyCode: UInt32
     var modifiers: UInt32
 
+    static let disabled = HotkeyDefinition(keyCode: 0, modifiers: 0)
+
     static let `default` = HotkeyDefinition(
         keyCode: UInt32(kVK_ANSI_T),
         modifiers: UInt32(cmdKey) | UInt32(optionKey)
@@ -90,6 +92,10 @@ struct HotkeyDefinition: Codable, Equatable, Hashable {
         keyCode: UInt32(kVK_ANSI_C),
         modifiers: UInt32(cmdKey) | UInt32(shiftKey)
     )
+
+    var isEnabled: Bool {
+        keyCode != 0 && modifiers != 0
+    }
 }
 
 enum QuickActionKind: String, Codable, CaseIterable, Identifiable {
@@ -138,11 +144,19 @@ struct SavedPrompt: Identifiable, Codable, Hashable {
     var updatedAt: Date
 }
 
+enum SavedLinkKind: String, Codable, Hashable {
+    case web
+    case file
+}
+
 struct SavedLink: Identifiable, Codable, Hashable {
     var id: UUID
     var title: String
     var url: String
+    var kind: SavedLinkKind
     var folderPath: String
+    var position: Int
+    var isPinned: Bool
     var summary: String?
     var notes: String?
     var createdAt: Date
@@ -151,6 +165,77 @@ struct SavedLink: Identifiable, Codable, Hashable {
     var aiRequestDate: Date?
     var aiResponseDate: Date?
     var awaitingAIResponse: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case url
+        case kind
+        case folderPath
+        case position
+        case isPinned
+        case summary
+        case notes
+        case createdAt
+        case updatedAt
+        case aiPrompt
+        case aiRequestDate
+        case aiResponseDate
+        case awaitingAIResponse
+    }
+
+    init(
+        id: UUID,
+        title: String,
+        url: String,
+        kind: SavedLinkKind,
+        folderPath: String,
+        position: Int,
+        isPinned: Bool,
+        summary: String?,
+        notes: String?,
+        createdAt: Date,
+        updatedAt: Date,
+        aiPrompt: String?,
+        aiRequestDate: Date?,
+        aiResponseDate: Date?,
+        awaitingAIResponse: Bool
+    ) {
+        self.id = id
+        self.title = title
+        self.url = url
+        self.kind = kind
+        self.folderPath = folderPath
+        self.position = position
+        self.isPinned = isPinned
+        self.summary = summary
+        self.notes = notes
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.aiPrompt = aiPrompt
+        self.aiRequestDate = aiRequestDate
+        self.aiResponseDate = aiResponseDate
+        self.awaitingAIResponse = awaitingAIResponse
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        url = try container.decode(String.self, forKey: .url)
+        kind = try container.decodeIfPresent(SavedLinkKind.self, forKey: .kind) ?? .web
+        folderPath = try container.decodeIfPresent(String.self, forKey: .folderPath) ?? AppSettings.recentLinksFolderName
+        position = try container.decodeIfPresent(Int.self, forKey: .position) ?? 0
+        isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? (folderPath != AppSettings.recentLinksFolderName)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        aiPrompt = try container.decodeIfPresent(String.self, forKey: .aiPrompt)
+        aiRequestDate = try container.decodeIfPresent(Date.self, forKey: .aiRequestDate)
+        aiResponseDate = try container.decodeIfPresent(Date.self, forKey: .aiResponseDate)
+        awaitingAIResponse = try container.decodeIfPresent(Bool.self, forKey: .awaitingAIResponse) ?? false
+    }
 }
 
 struct NoteTarget: Identifiable, Codable, Hashable {
@@ -273,11 +358,20 @@ struct RecoveryIssue: Identifiable, Codable {
 }
 
 struct AppSettings: Codable, Equatable {
-    static let currentSchemaVersion = 5
+    static let currentSchemaVersion = 6
+    static let recentLinksFolderName = "Recent"
 
     var schemaVersion: Int
     var hotkey: HotkeyDefinition
     var aiCaptureHotkey: HotkeyDefinition
+    var openSettingsHotkey: HotkeyDefinition
+    var nextNavigationHotkey: HotkeyDefinition
+    var previousNavigationHotkey: HotkeyDefinition
+    var activateSelectionHotkey: HotkeyDefinition
+    var editSelectionHotkey: HotkeyDefinition
+    var copySelectionHotkey: HotkeyDefinition
+    var deleteSelectionHotkey: HotkeyDefinition
+    var switchPaneHotkey: HotkeyDefinition
     var insertionPosition: InsertionPosition
     var timestampMode: TimestampMode
     var customDateFormat: String
@@ -296,11 +390,23 @@ struct AppSettings: Codable, Equatable {
     var aiPromptTemplate: String
     var aiAutoSubmit: Bool
     var defaultPromptID: UUID?
+    var clipboardMonitoringEnabled: Bool
+    var automaticLinkCaptureEnabled: Bool
+    var aiFeaturesEnabled: Bool
+    var linkFolders: [String]
 
     static let `default` = AppSettings(
         schemaVersion: AppSettings.currentSchemaVersion,
-        hotkey: .default,
-        aiCaptureHotkey: .clipDefault,
+        hotkey: .disabled,
+        aiCaptureHotkey: .disabled,
+        openSettingsHotkey: .disabled,
+        nextNavigationHotkey: .disabled,
+        previousNavigationHotkey: .disabled,
+        activateSelectionHotkey: .disabled,
+        editSelectionHotkey: .disabled,
+        copySelectionHotkey: .disabled,
+        deleteSelectionHotkey: .disabled,
+        switchPaneHotkey: .disabled,
         insertionPosition: .bottom,
         timestampMode: .dateTime,
         customDateFormat: "yyyy-MM-dd HH:mm:ss",
@@ -318,13 +424,25 @@ struct AppSettings: Codable, Equatable {
         aiAppPath: "",
         aiPromptTemplate: "Summarize the following text concisely and preserve the key details:",
         aiAutoSubmit: true,
-        defaultPromptID: nil
+        defaultPromptID: nil,
+        clipboardMonitoringEnabled: true,
+        automaticLinkCaptureEnabled: true,
+        aiFeaturesEnabled: true,
+        linkFolders: [AppSettings.recentLinksFolderName]
     )
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion
         case hotkey
         case aiCaptureHotkey
+        case openSettingsHotkey
+        case nextNavigationHotkey
+        case previousNavigationHotkey
+        case activateSelectionHotkey
+        case editSelectionHotkey
+        case copySelectionHotkey
+        case deleteSelectionHotkey
+        case switchPaneHotkey
         case insertionPosition
         case timestampMode
         case customDateFormat
@@ -343,12 +461,24 @@ struct AppSettings: Codable, Equatable {
         case aiPromptTemplate
         case aiAutoSubmit
         case defaultPromptID
+        case clipboardMonitoringEnabled
+        case automaticLinkCaptureEnabled
+        case aiFeaturesEnabled
+        case linkFolders
     }
 
     init(
         schemaVersion: Int,
         hotkey: HotkeyDefinition,
         aiCaptureHotkey: HotkeyDefinition,
+        openSettingsHotkey: HotkeyDefinition,
+        nextNavigationHotkey: HotkeyDefinition,
+        previousNavigationHotkey: HotkeyDefinition,
+        activateSelectionHotkey: HotkeyDefinition,
+        editSelectionHotkey: HotkeyDefinition,
+        copySelectionHotkey: HotkeyDefinition,
+        deleteSelectionHotkey: HotkeyDefinition,
+        switchPaneHotkey: HotkeyDefinition,
         insertionPosition: InsertionPosition,
         timestampMode: TimestampMode,
         customDateFormat: String,
@@ -366,11 +496,23 @@ struct AppSettings: Codable, Equatable {
         aiAppPath: String,
         aiPromptTemplate: String,
         aiAutoSubmit: Bool,
-        defaultPromptID: UUID?
+        defaultPromptID: UUID?,
+        clipboardMonitoringEnabled: Bool,
+        automaticLinkCaptureEnabled: Bool,
+        aiFeaturesEnabled: Bool,
+        linkFolders: [String]
     ) {
         self.schemaVersion = schemaVersion
         self.hotkey = hotkey
         self.aiCaptureHotkey = aiCaptureHotkey
+        self.openSettingsHotkey = openSettingsHotkey
+        self.nextNavigationHotkey = nextNavigationHotkey
+        self.previousNavigationHotkey = previousNavigationHotkey
+        self.activateSelectionHotkey = activateSelectionHotkey
+        self.editSelectionHotkey = editSelectionHotkey
+        self.copySelectionHotkey = copySelectionHotkey
+        self.deleteSelectionHotkey = deleteSelectionHotkey
+        self.switchPaneHotkey = switchPaneHotkey
         self.insertionPosition = insertionPosition
         self.timestampMode = timestampMode
         self.customDateFormat = customDateFormat
@@ -389,13 +531,25 @@ struct AppSettings: Codable, Equatable {
         self.aiPromptTemplate = aiPromptTemplate
         self.aiAutoSubmit = aiAutoSubmit
         self.defaultPromptID = defaultPromptID
+        self.clipboardMonitoringEnabled = clipboardMonitoringEnabled
+        self.automaticLinkCaptureEnabled = automaticLinkCaptureEnabled
+        self.aiFeaturesEnabled = aiFeaturesEnabled
+        self.linkFolders = linkFolders
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        hotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .hotkey) ?? .default
-        aiCaptureHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .aiCaptureHotkey) ?? .clipDefault
+        hotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .hotkey) ?? .disabled
+        aiCaptureHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .aiCaptureHotkey) ?? .disabled
+        openSettingsHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .openSettingsHotkey) ?? .disabled
+        nextNavigationHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .nextNavigationHotkey) ?? .disabled
+        previousNavigationHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .previousNavigationHotkey) ?? .disabled
+        activateSelectionHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .activateSelectionHotkey) ?? .disabled
+        editSelectionHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .editSelectionHotkey) ?? .disabled
+        copySelectionHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .copySelectionHotkey) ?? .disabled
+        deleteSelectionHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .deleteSelectionHotkey) ?? .disabled
+        switchPaneHotkey = try c.decodeIfPresent(HotkeyDefinition.self, forKey: .switchPaneHotkey) ?? .disabled
         insertionPosition = try c.decodeIfPresent(InsertionPosition.self, forKey: .insertionPosition) ?? .bottom
         timestampMode = try c.decodeIfPresent(TimestampMode.self, forKey: .timestampMode) ?? .dateTime
         customDateFormat = try c.decodeIfPresent(String.self, forKey: .customDateFormat) ?? "yyyy-MM-dd HH:mm:ss"
@@ -414,5 +568,10 @@ struct AppSettings: Codable, Equatable {
         aiPromptTemplate = try c.decodeIfPresent(String.self, forKey: .aiPromptTemplate) ?? AppSettings.default.aiPromptTemplate
         aiAutoSubmit = try c.decodeIfPresent(Bool.self, forKey: .aiAutoSubmit) ?? true
         defaultPromptID = try c.decodeIfPresent(UUID.self, forKey: .defaultPromptID)
+        clipboardMonitoringEnabled = try c.decodeIfPresent(Bool.self, forKey: .clipboardMonitoringEnabled) ?? true
+        automaticLinkCaptureEnabled = try c.decodeIfPresent(Bool.self, forKey: .automaticLinkCaptureEnabled) ?? true
+        aiFeaturesEnabled = try c.decodeIfPresent(Bool.self, forKey: .aiFeaturesEnabled) ?? true
+        let decodedLinkFolders = try c.decodeIfPresent([String].self, forKey: .linkFolders) ?? []
+        linkFolders = decodedLinkFolders.isEmpty ? [AppSettings.recentLinksFolderName] : decodedLinkFolders
     }
 }

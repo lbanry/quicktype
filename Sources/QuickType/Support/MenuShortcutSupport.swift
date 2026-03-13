@@ -8,8 +8,13 @@ struct MenuShortcut {
 
 extension HotkeyDefinition {
     var menuShortcut: MenuShortcut? {
-        guard let key = keyEquivalent else { return nil }
+        guard isEnabled, let key = keyEquivalent else { return nil }
         return MenuShortcut(key: key, modifiers: eventModifiers)
+    }
+
+    func matches(_ event: NSEvent) -> Bool {
+        guard isEnabled else { return false }
+        return keyCode == UInt32(event.keyCode) && modifiers == carbonFlags(from: event.modifierFlags)
     }
 
     private var keyEquivalent: KeyEquivalent? {
@@ -60,6 +65,15 @@ extension HotkeyDefinition {
         if modifiers & UInt32(optionKey) != 0 { result.insert(.option) }
         if modifiers & UInt32(controlKey) != 0 { result.insert(.control) }
         if modifiers & UInt32(shiftKey) != 0 { result.insert(.shift) }
+        return result
+    }
+
+    private func carbonFlags(from flags: NSEvent.ModifierFlags) -> UInt32 {
+        var result: UInt32 = 0
+        if flags.contains(.command) { result |= UInt32(cmdKey) }
+        if flags.contains(.option) { result |= UInt32(optionKey) }
+        if flags.contains(.control) { result |= UInt32(controlKey) }
+        if flags.contains(.shift) { result |= UInt32(shiftKey) }
         return result
     }
 }

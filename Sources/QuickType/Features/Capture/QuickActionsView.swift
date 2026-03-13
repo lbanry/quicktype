@@ -12,7 +12,6 @@ struct QuickActionsView: View {
             HStack {
                 Text("Actions")
                     .font(.title3.bold())
-                    .help("Use Up/Down to move, Space to run, Return to edit, Cmd+C to copy, Cmd+Delete to delete.")
                 Spacer()
                 Text("\(model.quickActions.count)")
                     .font(.caption.weight(.semibold))
@@ -87,38 +86,37 @@ struct QuickActionsView: View {
             guard editingAction == nil else { return event }
             guard !model.isHeaderKeyboardFocusActive else { return event }
 
-            if event.modifierFlags.contains(.command),
-               Int(event.keyCode) == 51 {
+            if model.settings.deleteSelectionHotkey.matches(event) {
                 deleteSelectedAction()
                 return nil
             }
 
-            if event.modifierFlags.contains(.command),
-               event.charactersIgnoringModifiers?.lowercased() == "c" {
+            if model.settings.copySelectionHotkey.matches(event) {
                 copySelectedAction()
                 return nil
             }
 
-            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
-                return event
-            }
-
-            switch Int(event.keyCode) {
-            case 48, 125:
+            if model.settings.nextNavigationHotkey.matches(event) {
                 moveSelection(delta: 1)
                 return nil
-            case 49:
+            }
+
+            if model.settings.activateSelectionHotkey.matches(event) {
                 runSelectedAction()
                 return nil
-            case 36, 76:
+            }
+
+            if model.settings.editSelectionHotkey.matches(event) {
                 editSelectedAction()
                 return nil
-            case 126:
+            }
+
+            if model.settings.previousNavigationHotkey.matches(event) {
                 moveSelection(delta: -1)
                 return nil
-            default:
-                return event
             }
+
+            return event
         }
     }
 
@@ -203,7 +201,6 @@ private struct QuickActionCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
         )
-        .help("Action: Space run, Return edit, Cmd+C copy output, Cmd+Delete delete")
     }
 
     private var detailText: String {
@@ -300,7 +297,6 @@ private struct QuickActionEditor: View {
                 Button("Save") {
                     save()
                 }
-                .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!isValid)
             }
         }

@@ -109,7 +109,7 @@ struct CaptureView: View {
                 }
                 .pickerStyle(.menu)
 
-                Button("Cmd+K") {
+                Button("Commands") {
                     showCommandPalette = true
                 }
                 .glassControl()
@@ -148,9 +148,8 @@ struct CaptureView: View {
                     }
                 }
                 .glassControl()
-                .keyboardShortcut(.return, modifiers: .command)
                 .disabled(model.noteTargets.isEmpty)
-                .help("Save note (Cmd+Return)")
+                .help("Save note")
             }
         }
         .padding(.horizontal, 14)
@@ -182,7 +181,7 @@ struct CaptureView: View {
                 )
         }
         .buttonStyle(GlassIconButtonStyle())
-        .help("\(helpText) (navigate header with Left/Right, activate with Space)")
+        .help(helpText)
     }
 
     @ViewBuilder
@@ -198,7 +197,7 @@ struct CaptureView: View {
                 )
         }
         .buttonStyle(GlassIconButtonStyle())
-        .help("\(helpText) (navigate header with Left/Right, activate with Space)")
+        .help(helpText)
     }
 
     private func installKeyboardMonitor() {
@@ -208,25 +207,29 @@ struct CaptureView: View {
                 return event
             }
 
-            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
-                return event
-            }
-
-            switch Int(event.keyCode) {
-            case 123:
+            if model.settings.previousNavigationHotkey.matches(event) {
                 model.isHeaderKeyboardFocusActive = true
                 moveHeaderSelection(delta: -1)
                 return nil
-            case 124:
+            }
+
+            if model.settings.nextNavigationHotkey.matches(event) {
                 model.isHeaderKeyboardFocusActive = true
                 moveHeaderSelection(delta: 1)
                 return nil
-            case 49:
+            }
+
+            if model.settings.activateSelectionHotkey.matches(event) {
                 activateSelectedHeaderControl()
                 return nil
-            default:
-                return event
             }
+
+            if model.settings.openSettingsHotkey.matches(event) {
+                openWindow(id: "settings-window")
+                return nil
+            }
+
+            return event
         }
     }
 

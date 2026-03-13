@@ -7,19 +7,22 @@ struct ClipboardView: View {
     @State private var keyMonitor: Any?
     @State private var selectedSection: ClipboardSection = .kept
     @State private var selectedItemID: UUID?
+    @State private var expandedItemIDs: Set<UUID> = []
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 clipboardSection(
-                    title: "Kept",
+                    title: "Saved",
                     items: model.keptClipboardItems,
-                    emptyMessage: "Saved clipboard items will appear here."
+                    section: .kept,
+                    emptyMessage: "Saved clips will appear here."
                 )
 
                 clipboardSection(
                     title: "Recent",
                     items: model.recentClipboardItems,
+                    section: .recent,
                     emptyMessage: "Copy text anywhere and QuickType will hold it here temporarily."
                 )
             }
@@ -47,21 +50,17 @@ struct ClipboardView: View {
     }
 
     @ViewBuilder
-    private func clipboardSection(title: String, items: [ClipboardItem], emptyMessage: String) -> some View {
+    private func clipboardSection(title: String, items: [ClipboardItem], section: ClipboardSection, emptyMessage: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(title)
                     .font(.title3.bold())
-                    .help(title == "Kept"
-                        ? "Use Tab to switch sections, Up/Down to move, Space to insert, Return to edit, Cmd+C to copy, Cmd+Delete to delete."
-                        : "Use Tab to switch sections, Up/Down to move, Space to insert, Return to edit, Cmd+C to copy, Cmd+Delete to delete.")
                 Spacer()
-                if title == "Recent", !items.isEmpty {
+                if section == .recent, !items.isEmpty {
                     Button("Clear Recent") {
                         model.clearRecentClipboardItems()
                     }
                     .glassControl()
-                    .help("Clear recent clipboard items")
                 }
                 Text("\(items.count)")
                     .font(.caption.weight(.semibold))
@@ -84,10 +83,11 @@ struct ClipboardView: View {
                     .glassCard()
             } else {
                 ForEach(items) { item in
-                    ClipboardItemCard(
+                    ClipboardAccordionCard(
                         item: item,
-                        shortcutLabel: title == "Kept" ? shortcutLabel(for: item, within: items) : nil,
+                        isExpanded: expandedItemIDs.contains(item.id),
                         isSelected: selectedItemID == item.id,
+                        onToggleExpanded: { toggleExpanded(item.id) },
                         onInsert: { model.insertClipboardItem(item.id) },
                         onCopy: { model.copyClipboardItem(item.id) },
                         onSummarize: { model.summarizeClipboardItemWithAI(item.id) },
@@ -108,12 +108,12 @@ struct ClipboardView: View {
         }
     }
 
-    private func shortcutLabel(for item: ClipboardItem, within items: [ClipboardItem]) -> String? {
-        guard let index = items.firstIndex(where: { $0.id == item.id }),
-              index < 10 else {
-            return nil
+    private func toggleExpanded(_ itemID: UUID) {
+        if expandedItemIDs.contains(itemID) {
+            expandedItemIDs.remove(itemID)
+        } else {
+            expandedItemIDs.insert(itemID)
         }
-        return index == 9 ? "0" : "\(index + 1)"
     }
 
     private func installKeyboardMonitor() {
@@ -122,48 +122,42 @@ struct ClipboardView: View {
             guard editingItem == nil else { return event }
             guard !model.isHeaderKeyboardFocusActive else { return event }
 
-            if event.modifierFlags.contains(.command),
-               Int(event.keyCode) == 51 {
+            if model.settings.deleteSelectionHotkey.matches(event) {
                 deleteSelectedItem()
                 return nil
             }
 
-            if event.modifierFlags.contains(.command),
-               event.charactersIgnoringModifiers?.lowercased() == "c" {
+            if model.settings.copySelectionHotkey.matches(event) {
                 copySelectedItem()
                 return nil
             }
 
-            if event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
-               let characters = event.charactersIgnoringModifiers,
-               let index = shortcutIndex(for: characters) {
-                model.insertKeptClipboardItem(atShortcutIndex: index)
-                return nil
-            }
-
-            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
-                return event
-            }
-
-            switch Int(event.keyCode) {
-            case 48:
+            if model.settings.switchPaneHotkey.matches(event) {
                 advanceSection()
                 return nil
-            case 49:
+            }
+
+            if model.settings.activateSelectionHotkey.matches(event) {
                 activateSelectedItem()
                 return nil
-            case 36, 76:
+            }
+
+            if model.settings.editSelectionHotkey.matches(event) {
                 editSelectedItem()
                 return nil
-            case 125:
+            }
+
+            if model.settings.nextNavigationHotkey.matches(event) {
                 moveSelection(delta: 1)
                 return nil
-            case 126:
+            }
+
+            if model.settings.previousNavigationHotkey.matches(event) {
                 moveSelection(delta: -1)
                 return nil
-            default:
-                return event
             }
+
+            return event
         }
     }
 
@@ -171,22 +165,6 @@ struct ClipboardView: View {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
-        }
-    }
-
-    private func shortcutIndex(for characters: String) -> Int? {
-        switch characters {
-        case "1": 0
-        case "2": 1
-        case "3": 2
-        case "4": 3
-        case "5": 4
-        case "6": 5
-        case "7": 6
-        case "8": 7
-        case "9": 8
-        case "0": 9
-        default: nil
         }
     }
 
@@ -241,7 +219,7 @@ struct ClipboardView: View {
 
     private func activateSelectedItem() {
         guard let selectedItemID else { return }
-        model.insertClipboardItem(selectedItemID)
+        toggleExpanded(selectedItemID)
     }
 
     private func editSelectedItem() {
@@ -266,10 +244,11 @@ private enum ClipboardSection {
     case recent
 }
 
-private struct ClipboardItemCard: View {
+private struct ClipboardAccordionCard: View {
     let item: ClipboardItem
-    let shortcutLabel: String?
+    let isExpanded: Bool
     let isSelected: Bool
+    let onToggleExpanded: () -> Void
     let onInsert: () -> Void
     let onCopy: () -> Void
     let onSummarize: () -> Void
@@ -281,71 +260,57 @@ private struct ClipboardItemCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        if let shortcutLabel {
-                            Text(shortcutLabel)
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 22, height: 22)
-                                .background(.thinMaterial, in: Circle())
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.white.opacity(0.22), lineWidth: 1)
-                                )
-                        }
                         Text(item.title)
                             .font(.headline)
                             .lineLimit(1)
                         if item.awaitingAIResponse {
-                            Text("Waiting")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(.thinMaterial, in: Capsule())
+                            badge("Waiting")
                         } else if item.aiResponse != nil {
-                            Text("AI")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(.thinMaterial, in: Capsule())
+                            badge("AI")
+                        }
+                        if item.isKept {
+                            badge("Saved")
                         }
                     }
                     Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onInsert)
                 Spacer()
-                actionButton(systemName: "doc.on.doc", helpText: "Copy item", action: onCopy)
+                actionButton(systemName: "arrowshape.turn.up.right", helpText: "Insert clip", action: onInsert)
+                actionButton(systemName: "doc.on.doc", helpText: "Copy clip", action: onCopy)
+                actionButton(systemName: item.isKept ? "pin.slash" : "pin", helpText: item.isKept ? "Move to Recent" : "Save clip", action: onKeepToggle)
                 actionButton(systemName: "sparkles", helpText: "Summarize with AI", action: onSummarize)
                 actionButton(systemName: "bolt.fill", helpText: "Create quick action", action: onCreateAction)
                 actionButton(systemName: "square.and.arrow.down", helpText: "Save to Quick Note", action: onSaveToQuickNote)
-                actionButton(systemName: "pencil", helpText: "Edit item", action: onEdit)
-                actionButton(systemName: "trash", helpText: "Delete item", role: .destructive, action: onDelete)
-                actionButton(
-                    systemName: item.isKept ? "pin.fill" : "pin",
-                    helpText: item.isKept ? "Unkeep item" : "Keep item",
-                    action: onKeepToggle
-                )
+                actionButton(systemName: "pencil", helpText: "Edit clip", action: onEdit)
+                actionButton(systemName: "trash", helpText: "Delete clip", role: .destructive, action: onDelete)
             }
 
-            Text(item.content)
-                .font(.body.monospaced())
-                .lineLimit(4)
-                .textSelection(.enabled)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onInsert)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(item.content)
+                    .font(.body.monospaced())
+                    .lineLimit(isExpanded ? nil : 3)
+                    .textSelection(.enabled)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onToggleExpanded)
 
-            HStack {
-                Spacer()
-                Text(item.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
+                HStack {
+                    Button(isExpanded ? "Collapse" : "Expand") {
+                        onToggleExpanded()
+                    }
+                    .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Text(item.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(14)
@@ -354,7 +319,15 @@ private struct ClipboardItemCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
         )
-        .help("Clipboard item: Space insert, Return edit, Cmd+C copy, Cmd+Delete delete")
+    }
+
+    private func badge(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(.thinMaterial, in: Capsule())
     }
 
     @ViewBuilder
@@ -375,7 +348,7 @@ private struct ClipboardItemCard: View {
                 )
         }
         .buttonStyle(GlassIconButtonStyle())
-        .help("\(helpText)")
+        .help(helpText)
     }
 }
 
@@ -412,7 +385,6 @@ private struct ClipboardItemEditor: View {
                     onSave(title, content)
                     dismiss()
                 }
-                .keyboardShortcut(.return, modifiers: .command)
             }
         }
         .padding()

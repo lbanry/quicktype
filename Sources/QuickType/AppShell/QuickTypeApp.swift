@@ -75,7 +75,6 @@ struct QuickTypeApp: App {
                 Button("Save Selection to Obsidian") {
                     model.saveHighlightedTextToObsidian(summarizeFirst: false)
                 }
-                .keyboardShortcut("o", modifiers: [.command, .option, .shift])
 
                 Button("Choose Obsidian Folder and Save") {
                     model.chooseObsidianFolderAndSaveHighlightedText(summarizeFirst: false)
@@ -85,11 +84,10 @@ struct QuickTypeApp: App {
                     model.saveHighlightedTextToObsidian(summarizeFirst: true)
                 }
 
-                Button("Open Settings") {
+                commandButton("Open Settings", hotkey: model.settings.openSettingsHotkey) {
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "settings-window")
                 }
-                .keyboardShortcut(",", modifiers: [.command])
             }
         }
 
@@ -99,7 +97,10 @@ struct QuickTypeApp: App {
         }
         .windowResizability(.contentSize)
 
-        MenuBarExtra("QuickType", systemImage: "note.text") {
+        MenuBarExtra("QuickType", systemImage: "note.text", isInserted: Binding(
+            get: { model.settings.showMenuBarIcon },
+            set: { _ in }
+        )) {
             Button("Open Capture") {
                 openOrFocusCaptureWindow()
             }

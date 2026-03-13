@@ -13,7 +13,6 @@ struct PromptLibraryView: View {
                 HStack {
                     Text("Prompts")
                         .font(.title3.bold())
-                        .help("Use Up/Down to move, Space to set default, Return to edit, Cmd+C to copy, Cmd+Delete to delete.")
                     Spacer()
                     Text("\(model.prompts.count)")
                         .font(.caption.weight(.semibold))
@@ -31,7 +30,7 @@ struct PromptLibraryView: View {
                 }
 
                 if model.prompts.isEmpty {
-                    Text("Add prompts here. `Shift+Cmd+C` will show them and Enter will use the default prompt.")
+                    Text("Add prompts here. Use the feature shortcuts tab if you want keyboard control for prompt browsing.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .padding(16)
@@ -103,38 +102,37 @@ struct PromptLibraryView: View {
             guard editingPrompt == nil else { return event }
             guard !model.isHeaderKeyboardFocusActive else { return event }
 
-            if event.modifierFlags.contains(.command),
-               Int(event.keyCode) == 51 {
+            if model.settings.deleteSelectionHotkey.matches(event) {
                 deleteSelectedPrompt()
                 return nil
             }
 
-            if event.modifierFlags.contains(.command),
-               event.charactersIgnoringModifiers?.lowercased() == "c" {
+            if model.settings.copySelectionHotkey.matches(event) {
                 copySelectedPrompt()
                 return nil
             }
 
-            guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
-                return event
-            }
-
-            switch Int(event.keyCode) {
-            case 48, 125:
+            if model.settings.nextNavigationHotkey.matches(event) {
                 moveSelection(delta: 1)
                 return nil
-            case 49:
+            }
+
+            if model.settings.activateSelectionHotkey.matches(event) {
                 setDefaultPrompt()
                 return nil
-            case 36, 76:
+            }
+
+            if model.settings.editSelectionHotkey.matches(event) {
                 editSelectedPrompt()
                 return nil
-            case 126:
+            }
+
+            if model.settings.previousNavigationHotkey.matches(event) {
                 moveSelection(delta: -1)
                 return nil
-            default:
-                return event
             }
+
+            return event
         }
     }
 
@@ -230,7 +228,6 @@ private struct PromptCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.white.opacity(0.4) : .clear, lineWidth: 2)
         )
-        .help("Prompt: Space set default, Return edit, Cmd+C copy, Cmd+Delete delete")
     }
 
     @ViewBuilder
@@ -293,7 +290,6 @@ private struct PromptEditor: View {
                     }
                     dismiss()
                 }
-                .keyboardShortcut(.return, modifiers: .command)
             }
         }
         .padding()
